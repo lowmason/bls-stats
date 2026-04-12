@@ -1,6 +1,6 @@
 site_name: bls-stats
 site_description: BLS release-dates and download pipeline for QCEW, CES, SAE, BED, and JOLTS
-repo_url: https://github.com/lowell/bls-stats
+repo_url: https://github.com/lowmason/bls-stats-aggregation
 
 theme:
   name: material

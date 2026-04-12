@@ -28,14 +28,17 @@ Register for a free API key at <https://data.bls.gov/registrationEngine/>.
 ### Via CLI
 
 ```bash
-# Download QCEW data for Q1 2024
-bls-stats download --program qcew --ref-date 2024-01
+# Download QCEW data for all of 2024
+bls-stats download --program qcew --year 2024
 
-# Download CES data for January 2024
-bls-stats download --program ces --ref-date 2024-01
+# Download CES data for Jan–Jun 2024
+bls-stats download --program ces --start-date 2024-01 --end-date 2024-06
+
+# Download a multi-year range
+bls-stats download --program sae --year 2022-2024
 
 # Enable debug logging
-bls-stats -v download --program bed --ref-date 2024-01
+bls-stats -v download --program bed --year 2024
 ```
 
 ### Via Python
@@ -45,10 +48,10 @@ from datetime import date
 from bls_stats.download import download_qcew, download_ces
 
 # QCEW — no API key needed
-df = download_qcew(date(2024, 1, 1))
+df = download_qcew(date(2024, 1, 1), date(2024, 6, 1))
 
 # CES — uses BLS_API_KEY env var
-df = download_ces(date(2024, 1, 1), api_key="your-key")
+df = download_ces(date(2024, 1, 1), date(2024, 6, 1))
 ```
 
 ## Scraping release dates

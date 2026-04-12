@@ -25,10 +25,16 @@ Set your BLS API key (required for V2 API programs — CES, SAE, BED, JOLTS):
 export BLS_API_KEY="your-key-here"
 ```
 
-Download QCEW data for a reference quarter:
+Download QCEW data for 2024:
 
 ```bash
-bls-stats download --program qcew --ref-date 2024-01
+bls-stats download --program qcew --year 2024
+```
+
+Or for a specific month range:
+
+```bash
+bls-stats download --program qcew --start-date 2024-01 --end-date 2024-06
 ```
 
 Or use the library directly:
@@ -37,7 +43,7 @@ Or use the library directly:
 from datetime import date
 from bls_stats.download import download_qcew
 
-df = download_qcew(date(2024, 1, 1))
+df = download_qcew(date(2024, 1, 1), date(2024, 6, 1))
 print(df.head())
 ```
 

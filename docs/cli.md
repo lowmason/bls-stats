@@ -16,23 +16,38 @@ bls-stats [OPTIONS] COMMAND [ARGS]...
 
 ## `download`
 
-Download data for a single BLS program and reference date.
+Download bulk data for a single BLS program over a date range.
 
 ```
-bls-stats download --program PROGRAM --ref-date YYYY-MM [--api-key KEY]
+bls-stats download --program PROGRAM [--year YYYY | YYYY-YYYY]
+                    [--start-date YYYY-MM] [--end-date YYYY-MM]
 ```
 
-| Option        | Required | Description                                       |
-|---------------|----------|---------------------------------------------------|
-| `--program`   | Yes      | One of `qcew`, `ces`, `sae`, `bed`, `jolts`       |
-| `--ref-date`  | Yes      | Reference date in `YYYY-MM` format                 |
-| `--api-key`   | No       | BLS API key (overrides `BLS_API_KEY` env var)       |
+Provide **either** `--year` or `--start-date`/`--end-date`, not both.
+
+| Option          | Required | Description                                       |
+|-----------------|----------|---------------------------------------------------|
+| `--program`     | Yes      | One of `qcew`, `ces`, `sae`, `bed`, `jolts`       |
+| `--year`        | No*      | Year (`YYYY`) or year range (`YYYY-YYYY`)          |
+| `--start-date`  | No*      | Start date in `YYYY-MM` format                     |
+| `--end-date`    | No       | End date in `YYYY-MM` format (defaults to start)   |
+
+*One of `--year` or `--start-date` is required.
 
 ### Examples
 
 ```bash
-bls-stats download --program qcew --ref-date 2024-01
-bls-stats download --program ces --ref-date 2024-06 --api-key abc123
+# Full year
+bls-stats download --program qcew --year 2024
+
+# Multi-year range
+bls-stats download --program sae --year 2020-2024
+
+# Month range
+bls-stats download --program ces --start-date 2024-01 --end-date 2024-06
+
+# Single month
+bls-stats download --program bed --start-date 2024-03
 ```
 
 ## `release-dates`
