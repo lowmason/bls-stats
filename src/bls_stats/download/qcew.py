@@ -7,7 +7,7 @@ containing all industries, areas, ownership types, and size classes.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -103,6 +103,8 @@ def download_qcew(
             pl.col("qtr").cast(pl.Int32),
         )
         combined = _filter_to_range(combined, start_date, end_date)
+
+    combined = combined.with_columns(pl.lit(datetime.now()).alias("downloaded"))
 
     out_path = out_dir / QCEW_ESTIMATES_FILE
     combined.write_parquet(out_path)

@@ -12,16 +12,14 @@ pip install -e ".[docs]"
 
 `bls-stats` reads configuration from environment variables:
 
-| Variable        | Description                            | Default  |
-|-----------------|----------------------------------------|----------|
-| `BLS_API_KEY`   | BLS V2 API registration key            | *(none)* |
-| `BLS_DATA_DIR`  | Root directory for downloaded data      | `data`   |
+| Variable             | Description                                  | Default                |
+|----------------------|----------------------------------------------|------------------------|
+| `BLS_DATA_DIR`       | Root directory for downloaded data            | `data`                 |
+| `BLS_CONTACT_EMAIL`  | Contact email sent in the HTTP `User-Agent`   | `research@example.com` |
 
 !!! note
-    The **QCEW** program uses a public CSV endpoint and does not require an API key.
-    All other programs (CES, SAE, BED, JOLTS) use the V2 JSON API and **do** require a key.
-
-Register for a free API key at <https://data.bls.gov/registrationEngine/>.
+    No API key is required. All programs download public data from `download.bls.gov`.
+    QCEW uses a bulk annual zip; CES, SAE, BED, and JOLTS use tab-delimited flat files.
 
 ## Downloading data
 
@@ -47,10 +45,10 @@ bls-stats -v download --program bed --year 2024
 from datetime import date
 from bls_stats.download import download_qcew, download_ces
 
-# QCEW — no API key needed
+# QCEW — bulk annual zip download
 df = download_qcew(date(2024, 1, 1), date(2024, 6, 1))
 
-# CES — uses BLS_API_KEY env var
+# CES — public flat file download
 df = download_ces(date(2024, 1, 1), date(2024, 6, 1))
 ```
 
@@ -72,16 +70,18 @@ for rd in dates:
     print(f"{rd.publication:8s}  {rd.release_date}  {rd.title}")
 ```
 
-## Building series IDs
+## BLS program registry
+
+The `bls_stats.bls` module provides a structured registry of BLS program definitions,
+including series-ID field layouts for positional parsing:
 
 ```python
-from bls_stats.series import ce_series_id, jt_series_id
+from bls_stats.bls import PROGRAMS
 
-# CES: Total nonfarm, all employees
-sid = ce_series_id(supersector="00", industry="000000", data_type="01")
-print(sid)  # CES0000000001
+ces = PROGRAMS["CE"]
+print(ces.name)             # Current Employment Statistics
+print(ces.series_id_length) # 13
 
-# JOLTS: Total nonfarm, job openings, national
-sid = jt_series_id(data_element="JO")
-print(sid)  # JTS00000000000JOJOL
+for name, offset, length in ces.field_slices():
+    print(f"  {name}: offset={offset}, length={length}")
 ```

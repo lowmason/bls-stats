@@ -55,9 +55,8 @@ nav:
   - Getting Started: getting-started.md
   - API Reference:
       - api/index.md
-      - BLS Client: api/bls.md
+      - BLS Programs: api/bls.md
       - Downloads: api/download.md
-      - Series Builders: api/series.md
       - Release Dates: api/release-dates.md
       - Configuration: api/config.md
   - CLI Reference: cli.md

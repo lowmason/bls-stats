@@ -1,11 +1,8 @@
 # Downloads
 
-::: bls_stats.download.qcew
-    options:
-      members:
-        - download_qcew
+::: bls_stats.download.fetch
 
-::: bls_stats.download.qcew_client
+::: bls_stats.download.qcew
 
 ::: bls_stats.download.ces
 

@@ -7,7 +7,7 @@ series IDs into component fields, and filters to the requested period.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -94,6 +94,8 @@ def download_ces(
         pl.lit("national").alias("geographic_type"),
         pl.lit("US").alias("geographic_code"),
     )
+
+    df = df.with_columns(pl.lit(datetime.now()).alias("downloaded"))
 
     out_path = out_dir / CES_ESTIMATES_FILE
     df.write_parquet(out_path)

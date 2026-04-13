@@ -8,8 +8,8 @@ All downloads return tidy [Polars](https://pola.rs/) DataFrames.
 
 ## Features
 
-- **Multi-program downloads** — QCEW (flat-file API), CES, SAE, BED, and JOLTS (V2 JSON API).
-- **Series ID builders** — programmatic construction of BLS series identifiers for each survey.
+- **Multi-program downloads** — QCEW (bulk zip), CES, SAE, BED, and JOLTS (public flat files).
+- **BLS program registry** — structured series-ID field definitions for positional parsing.
 - **Release-date scraping** — extract publication dates from BLS archive pages.
 - **Polars DataFrames** — all downloads return tidy DataFrames with a common schema.
 - **CLI** — `bls-stats download` and `bls-stats release-dates` commands.
@@ -28,14 +28,12 @@ pip install -e ".[docs]"
 
 ## Configuration
 
-| Variable       | Description                       | Default  |
-|----------------|-----------------------------------|----------|
-| `BLS_API_KEY`  | BLS V2 API registration key       | *(none)* |
-| `BLS_DATA_DIR` | Root directory for downloaded data | `data`   |
+| Variable             | Description                                  | Default              |
+|----------------------|----------------------------------------------|----------------------|
+| `BLS_DATA_DIR`       | Root directory for downloaded data            | `data`               |
+| `BLS_CONTACT_EMAIL`  | Contact email sent in the HTTP `User-Agent`   | `research@example.com` |
 
-QCEW uses a public CSV endpoint and does not require an API key.
-All other programs (CES, SAE, BED, JOLTS) use the V2 JSON API and require a key.
-Register for free at <https://data.bls.gov/registrationEngine/>.
+No API key is required. All programs download public data from `download.bls.gov`.
 
 ## Quick start
 
@@ -70,7 +68,3 @@ Full docs (including API reference) are built with [MkDocs Material](https://squ
 pip install -e ".[docs]"
 mkdocs serve
 ```
-
-## License
-
-See [LICENSE](LICENSE) for details.

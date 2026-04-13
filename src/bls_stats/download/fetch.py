@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import time
 import zipfile
 
@@ -16,7 +17,8 @@ import polars as pl
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = "bls-stats/0.1.0 (Federal statistics research)"
+_CONTACT = os.environ.get("BLS_CONTACT_EMAIL", "research@example.com")
+USER_AGENT = f"bls-stats/0.1 (Federal statistics research; contact: {_CONTACT})"
 DEFAULT_TIMEOUT = 300.0
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2.0

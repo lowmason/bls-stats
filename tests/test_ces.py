@@ -1,17 +1,11 @@
-"""Tests for JOLTS downloader."""
+"""Tests for CES downloader."""
 
 from datetime import date
 from unittest.mock import patch
 
 import polars as pl
 
-from bls_stats.download.jolts import (
-    _period_to_month,
-    _classify_geo,
-    _add_parsed_fields,
-    _filter_to_range,
-    REGION_CODES,
-)
+from bls_stats.download.ces import _period_to_month, _add_parsed_fields, _filter_to_range
 
 
 class TestPeriodToMonth:
@@ -27,42 +21,21 @@ class TestPeriodToMonth:
     def test_quarter_code(self):
         assert _period_to_month("Q01") is None
 
-    def test_invalid(self):
-        assert _period_to_month("X99") is None
-
     def test_non_numeric(self):
         assert _period_to_month("MAB") is None
 
 
-class TestClassifyGeo:
-    def test_national(self):
-        assert _classify_geo("00", "00000") == ("national", "US")
-
-    def test_region(self):
-        for code in REGION_CODES:
-            gt, gc = _classify_geo(code, "00000")
-            assert gt == "region"
-            assert gc == code
-
-    def test_state(self):
-        assert _classify_geo("06", "00000") == ("state", "06")
-
-    def test_area(self):
-        assert _classify_geo("06", "31080") == ("area", "0631080")
-
-
 class TestAddParsedFields:
     def test_parses_series_id(self):
-        # JTS000000000000000JOL -> 21 chars
+        # CES0000000001 -> 13 chars: prefix(2) + seasonal(1) + supersector(2) + industry(6) + data_type(2)
         df = pl.DataFrame({
-            "series_id": ["JTS000000000000000JOL"],
+            "series_id": ["CEU0000000001"],
         })
         result = _add_parsed_fields(df)
-        assert result["seasonal"][0] == "S"
-        assert result["industry_code"][0] == "000000"
-        assert result["state_code"][0] == "00"
-        assert result["area_code"][0] == "00000"
-        assert result["rate_level"][0] == "L"
+        assert result["seasonal"][0] == "U"
+        assert result["supersector"][0] == "00"
+        assert result["industry"][0] == "000000"
+        assert result["data_type"][0] == "01"
 
 
 class TestFilterToRange:
@@ -75,7 +48,7 @@ class TestFilterToRange:
         result = _filter_to_range(df, date(2024, 1, 1), date(2024, 6, 30))
         assert len(result) == 2
 
-    def test_excludes_m13(self):
+    def test_excludes_annual_avg(self):
         df = pl.DataFrame({
             "year": [2024, 2024],
             "period": ["M01", "M13"],
@@ -85,22 +58,22 @@ class TestFilterToRange:
         assert len(result) == 1
 
 
-class TestDownloadJOLTS:
-    @patch("bls_stats.download.jolts.read_tsv")
+class TestDownloadCES:
+    @patch("bls_stats.download.ces.read_tsv")
     def test_end_to_end(self, mock_read_tsv, tmp_path):
         mock_read_tsv.return_value = pl.DataFrame({
-            "series_id": ["JTS000000000000000JOL"],
+            "series_id": ["CES0000000001"],
             "year": [2024],
             "period": ["M01"],
-            "value": ["8765.0"],
+            "value": ["157000"],
             "footnote_codes": [""],
         })
 
-        from bls_stats.download.jolts import download_jolts
+        from bls_stats.download.ces import download_ces
 
-        df = download_jolts(date(2024, 1, 1), date(2024, 3, 31), out_dir=tmp_path)
+        df = download_ces(date(2024, 1, 1), date(2024, 3, 31), out_dir=tmp_path)
 
         assert len(df) == 1
-        assert df["source"][0] == "jolts"
+        assert df["source"][0] == "ces"
         assert df["geographic_type"][0] == "national"
-        assert (tmp_path / "jolts_estimates.parquet").exists()
+        assert (tmp_path / "ces_estimates.parquet").exists()

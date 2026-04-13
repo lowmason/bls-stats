@@ -7,8 +7,8 @@ U.S. Bureau of Labor Statistics and scraping publication release dates from thei
 
 ## Features
 
-- **Multi-program downloads** — QCEW (flat-file API), CES, SAE, BED, and JOLTS (V2 JSON API).
-- **Series ID builders** — programmatic construction of BLS series identifiers for each survey.
+- **Multi-program downloads** — QCEW (bulk zip), CES, SAE, BED, and JOLTS (public flat files).
+- **BLS program registry** — structured series-ID field definitions for positional parsing.
 - **Release-date scraping** — extract publication dates from BLS archive pages.
 - **Polars DataFrames** — all downloads return tidy Polars DataFrames with a common schema.
 - **CLI** — `bls-stats download` and `bls-stats release-dates` commands.
@@ -17,12 +17,6 @@ U.S. Bureau of Labor Statistics and scraping publication release dates from thei
 
 ```bash
 pip install bls-stats
-```
-
-Set your BLS API key (required for V2 API programs — CES, SAE, BED, JOLTS):
-
-```bash
-export BLS_API_KEY="your-key-here"
 ```
 
 Download QCEW data for 2024:

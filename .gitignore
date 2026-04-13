@@ -5,3 +5,6 @@ dist/
 build/
 .venv/
 site/
+.coverage
+.env
+data/

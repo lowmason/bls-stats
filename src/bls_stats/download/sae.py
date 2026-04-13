@@ -7,7 +7,7 @@ series IDs into component fields, and filters to the requested period.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -108,6 +108,8 @@ def download_sae(
         pl.Series("geographic_type", geo_types),
         pl.Series("geographic_code", geo_codes),
     )
+
+    df = df.with_columns(pl.lit(datetime.now()).alias("downloaded"))
 
     out_path = out_dir / SAE_ESTIMATES_FILE
     df.write_parquet(out_path)

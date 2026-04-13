@@ -1,5 +1,3 @@
-# BLS Client
-
-::: bls_stats.bls.client
+# BLS Programs
 
 ::: bls_stats.bls.programs

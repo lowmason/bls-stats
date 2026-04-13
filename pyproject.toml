@@ -36,3 +36,14 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=bls_stats --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["bls_stats"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "if __name__ == .__main__.",
+    "raise RuntimeError\\(\"unreachable\"\\)",
+]
