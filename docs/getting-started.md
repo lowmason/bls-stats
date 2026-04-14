@@ -41,33 +41,50 @@ bls-stats -v download --program bed --year 2024
 
 ### Via Python
 
+Each download function accepts a list of `(year, period)` tuples — months for
+CES/SAE/JOLTS, quarters for QCEW/BED. Use `reference_periods` to generate
+these from human-readable strings:
+
 ```python
-from datetime import date
+from bls_stats.bls import reference_periods
 from bls_stats.download import download_qcew, download_ces
 
-# QCEW — bulk annual zip download
-df = download_qcew(date(2024, 1, 1), date(2024, 6, 1))
+# QCEW — quarterly periods
+periods = reference_periods("qcew", "2024/Q1", "2024/Q2")
+df = download_qcew(periods)
 
-# CES — public flat file download
-df = download_ces(date(2024, 1, 1), date(2024, 6, 1))
+# CES — monthly periods
+periods = reference_periods("ces", "2024/01", "2024/06")
+df = download_ces(periods)
 ```
 
 ## Scraping release dates
 
+### Via CLI
+
 ```bash
-# Scrape all publications
+# Scrape all publications (archive + schedule HTML)
 bls-stats release-dates
 
-# Scrape a single publication, limit to 5 releases
-bls-stats release-dates --program ces --max-releases 5
+# Scrape a single publication
+bls-stats release-dates --program ces
+
+# Poll Atom feeds instead of scraping HTML
+bls-stats release-dates --feed
 ```
 
-```python
-from bls_stats.release_dates.scraper import scrape_all
+### Via Python
 
-dates = scrape_all(max_per_pub=5)
-for rd in dates:
-    print(f"{rd.publication:8s}  {rd.release_date}  {rd.title}")
+```python
+from bls_stats.release_dates import scrape_all, poll_all
+
+# Scrape archive + schedule pages, merge lapse revisions
+df = scrape_all()
+print(df)
+
+# Or poll Atom feeds for the latest releases
+df = poll_all()
+print(df)
 ```
 
 ## BLS program registry
@@ -84,4 +101,21 @@ print(ces.series_id_length) # 13
 
 for name, offset, length in ces.field_slices():
     print(f"  {name}: offset={offset}, length={length}")
+```
+
+### Reference periods
+
+The `reference_periods` helper generates the `(year, period)` tuples that the
+download functions expect:
+
+```python
+from bls_stats.bls import reference_periods
+
+# Monthly programs (CES, SAE, JOLTS) — "YYYY/MM"
+reference_periods("ces", "2024/01", "2024/06")
+# [(2024, 1), (2024, 2), (2024, 3), (2024, 4), (2024, 5), (2024, 6)]
+
+# Quarterly programs (QCEW, BED) — "YYYY/QN"
+reference_periods("qcew", "2023/Q3", "2024/Q2")
+# [(2023, 3), (2023, 4), (2024, 1), (2024, 2)]
 ```

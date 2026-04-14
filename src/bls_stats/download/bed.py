@@ -1,7 +1,7 @@
 """BED (Business Employment Dynamics) downloader — bulk flat file.
 
-Downloads the complete BD data file from the BLS FTP server, parses
-series IDs into component fields, and filters to the requested period.
+Downloads the complete BD data file from the BLS FTP server and filters
+to the requested periods.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from pathlib import Path
 
 import polars as pl
 
-from bls_stats.bls.programs import PROGRAMS
 from bls_stats.config import BED_DIR, BED_ESTIMATES_FILE
 from bls_stats.download.fetch import read_tsv
 
@@ -20,62 +19,56 @@ logger = logging.getLogger(__name__)
 
 BED_DATA_URL = "https://download.bls.gov/pub/time.series/bd/bd.data.0.Current"
 
-_PROGRAM = PROGRAMS["BD"]
-
-_QUARTER_MAP = {"Q01": 1, "Q02": 4, "Q03": 7, "Q04": 10}
+_QUARTER_LAST_MONTH = {1: 3, 2: 6, 3: 9, 4: 12}
 
 
-def _period_to_quarter_date(year: int, period: str) -> date | None:
-    month = _QUARTER_MAP.get(period)
-    if month is None:
+def _period_to_quarter(period: str) -> int | None:
+    """Convert BLS period code (Q01-Q04) to quarter int."""
+    if not period.startswith("Q"):
         return None
-    return date(year, month, 1)
+    try:
+        q = int(period[1:])
+    except ValueError:
+        return None
+    return q if 1 <= q <= 4 else None
 
 
-def _add_parsed_fields(df: pl.DataFrame) -> pl.DataFrame:
-    for name, offset, length in _PROGRAM.field_slices():
-        if name == "prefix":
-            continue
-        df = df.with_columns(
-            pl.col("series_id").str.slice(offset, length).str.strip_chars().alias(name)
-        )
-    return df
-
-
-def _classify_geo(area_code: str) -> tuple[str, str]:
-    """Derive geographic_type and geographic_code from BD 10-digit area code."""
-    if area_code == "0000000000":
-        return "national", "US"
-    state_fips = area_code[:2]
-    if area_code[2:] == "00000000":
-        return "state", state_fips
-    return "area", area_code
-
-
-def _filter_to_range(
-    df: pl.DataFrame, start_date: date, end_date: date
+def _filter_to_periods(
+    df: pl.DataFrame, periods: set[tuple[int, int]]
 ) -> pl.DataFrame:
     df = df.with_columns(
-        pl.struct(["year", "period"])
+        pl.col("period").str.strip_chars().map_elements(
+            _period_to_quarter, return_dtype=pl.Int32
+        ).alias("_quarter")
+    )
+    df = df.filter(pl.col("_quarter").is_not_null())
+    df = df.filter(
+        pl.struct(["year", "_quarter"]).map_elements(
+            lambda s: (int(s["year"]), int(s["_quarter"])) in periods,
+            return_dtype=pl.Boolean,
+        )
+    )
+    df = df.with_columns(
+        pl.col("_quarter")
+        .replace_strict(_QUARTER_LAST_MONTH, return_dtype=pl.Int32)
+        .alias("_last_month")
+    )
+    df = df.with_columns(
+        pl.struct(["year", "_last_month"])
         .map_elements(
-            lambda s: _period_to_quarter_date(int(s["year"]), s["period"].strip()),
+            lambda s: date(int(s["year"]), int(s["_last_month"]), 12),
             return_dtype=pl.Date,
         )
         .alias("ref_date")
     )
-    df = df.filter(pl.col("ref_date").is_not_null())
-    return df.filter(
-        (pl.col("ref_date") >= start_date.replace(day=1))
-        & (pl.col("ref_date") <= end_date.replace(day=1))
-    )
+    return df.drop("_quarter", "_last_month")
 
 
 def download_bed(
-    start_date: date,
-    end_date: date,
+    periods: list[tuple[int, int]],
     out_dir: Path | None = None,
 ) -> pl.DataFrame:
-    """Download all BED data for the requested date range."""
+    """Download BED data for the requested (year, quarter) periods."""
     out_dir = out_dir or BED_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -84,27 +77,7 @@ def download_bed(
     logger.info("BED: %d total rows downloaded", len(df))
 
     df = df.with_columns(pl.col("year").cast(pl.Int32))
-    df = df.filter(
-        (pl.col("year") >= start_date.year) & (pl.col("year") <= end_date.year)
-    )
-
-    df = _add_parsed_fields(df)
-    df = _filter_to_range(df, start_date, end_date)
-
-    geo_rows = df.select("area_code").to_dicts()
-    geo_types = []
-    geo_codes = []
-    for row in geo_rows:
-        gt, gc = _classify_geo(row["area_code"])
-        geo_types.append(gt)
-        geo_codes.append(gc)
-
-    df = df.with_columns(
-        pl.lit("bed").alias("source"),
-        (pl.col("seasonal") == "S").alias("seasonally_adjusted"),
-        pl.Series("geographic_type", geo_types),
-        pl.Series("geographic_code", geo_codes),
-    )
+    df = _filter_to_periods(df, set(periods))
 
     df = df.with_columns(pl.lit(datetime.now()).alias("downloaded"))
 

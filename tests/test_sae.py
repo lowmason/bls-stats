@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import polars as pl
 
-from bls_stats.download.sae import _period_to_month, _classify_geo, _add_parsed_fields, _filter_to_range
+from bls_stats.download.sae import _period_to_month, _filter_to_periods
 
 
 class TestPeriodToMonth:
@@ -25,38 +25,16 @@ class TestPeriodToMonth:
         assert _period_to_month("MAB") is None
 
 
-class TestClassifyGeo:
-    def test_national(self):
-        assert _classify_geo("00", "00000") == ("national", "US")
-
-    def test_state(self):
-        assert _classify_geo("06", "00000") == ("state", "06")
-
-    def test_area(self):
-        assert _classify_geo("06", "31080") == ("area", "0631080")
-
-
-class TestAddParsedFields:
-    def test_parses_series_id(self):
-        # SMU0600000000000001 -> 20 chars: prefix(2) + seasonal(1) + state(2) + area(5) + supersector(2) + industry(6) + data_type(2)
-        df = pl.DataFrame({
-            "series_id": ["SMU0600000000000001"],
-        })
-        result = _add_parsed_fields(df)
-        assert result["seasonal"][0] == "U"
-        assert result["state"][0] == "06"
-        assert result["area"][0] == "00000"
-
-
-class TestFilterToRange:
-    def test_filters_months(self):
+class TestFilterToPeriods:
+    def test_keeps_matching_periods(self):
         df = pl.DataFrame({
             "year": [2024, 2024, 2024],
             "period": ["M01", "M06", "M12"],
             "value": [10, 20, 30],
         })
-        result = _filter_to_range(df, date(2024, 1, 1), date(2024, 6, 30))
+        result = _filter_to_periods(df, {(2024, 1), (2024, 6)})
         assert len(result) == 2
+        assert result["value"].to_list() == [10, 20]
 
     def test_excludes_annual_avg(self):
         df = pl.DataFrame({
@@ -64,8 +42,17 @@ class TestFilterToRange:
             "period": ["M01", "M13"],
             "value": [10, 20],
         })
-        result = _filter_to_range(df, date(2024, 1, 1), date(2024, 12, 31))
+        result = _filter_to_periods(df, {(2024, 1), (2024, 13)})
         assert len(result) == 1
+
+    def test_ref_date_day_is_12(self):
+        df = pl.DataFrame({
+            "year": [2024],
+            "period": ["M03"],
+            "value": [10],
+        })
+        result = _filter_to_periods(df, {(2024, 3)})
+        assert result["ref_date"][0] == date(2024, 3, 12)
 
 
 class TestDownloadSAE:
@@ -81,8 +68,12 @@ class TestDownloadSAE:
 
         from bls_stats.download.sae import download_sae
 
-        df = download_sae(date(2024, 1, 1), date(2024, 3, 31), out_dir=tmp_path)
+        df = download_sae([(2024, 1)], out_dir=tmp_path)
 
         assert len(df) == 1
-        assert df["source"][0] == "sae"
+        assert set(df.columns) == {
+            "series_id", "year", "period", "value", "footnote_codes",
+            "month", "ref_date", "downloaded",
+        }
+        assert df["ref_date"][0] == date(2024, 1, 12)
         assert (tmp_path / "sae_estimates.parquet").exists()

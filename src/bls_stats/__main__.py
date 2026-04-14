@@ -117,24 +117,30 @@ def download(
     help="Scrape a single publication (default: all).",
 )
 @click.option(
-    "--max-releases",
-    default=None,
-    type=int,
-    help="Max releases to scrape per publication.",
+    "--feed",
+    is_flag=True,
+    default=False,
+    help="Use Atom feed polling instead of HTML scraping.",
 )
-def release_dates(program: str | None, max_releases: int | None) -> None:
-    """Scrape BLS archive pages for publication release dates."""
-    from bls_stats.release_dates.scraper import scrape_all, scrape_archive
+def release_dates(program: str | None, feed: bool) -> None:
+    """Scrape BLS pages (or poll Atom feeds) for publication release dates."""
+    if feed:
+        from bls_stats.release_dates.feed import poll_all, poll_feed
 
-    if program:
-        results = scrape_archive(program, max_releases=max_releases)
+        if program:
+            df = poll_feed(program)
+        else:
+            df = poll_all()
     else:
-        results = scrape_all(max_per_pub=max_releases)
+        from bls_stats.release_dates.scraper import scrape_all, scrape_archive
 
-    for rd in results:
-        click.echo(f"{rd.publication:8s}  {rd.release_date}  {rd.title}")
+        if program:
+            df = scrape_archive(program)
+        else:
+            df = scrape_all()
 
-    click.echo(f"\nTotal: {len(results)} release dates scraped.")
+    click.echo(df)
+    click.echo(f"\nTotal: {len(df)} release dates.")
 
 
 if __name__ == "__main__":

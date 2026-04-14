@@ -5,51 +5,17 @@ from unittest.mock import patch
 
 import polars as pl
 
-from bls_stats.download.qcew import _classify_area, _quarter_for_month, _filter_to_range
+from bls_stats.download.qcew import _filter_to_periods, _ref_date_from_quarter
 
 
-class TestClassifyArea:
-    def test_national(self):
-        assert _classify_area("US000") == ("national", "US")
-
-    def test_state(self):
-        assert _classify_area("06000") == ("state", "06")
-
-    def test_county(self):
-        assert _classify_area("06037") == ("county", "06037")
-
-    def test_msa(self):
-        assert _classify_area("C3108") == ("msa", "C3108")
-
-    def test_whitespace_stripped(self):
-        assert _classify_area("  US000  ") == ("national", "US")
-
-
-class TestQuarterForMonth:
-    def test_jan(self):
-        assert _quarter_for_month(1) == 1
-
-    def test_apr(self):
-        assert _quarter_for_month(4) == 2
-
-    def test_jul(self):
-        assert _quarter_for_month(7) == 3
-
-    def test_oct(self):
-        assert _quarter_for_month(10) == 4
-
-    def test_dec(self):
-        assert _quarter_for_month(12) == 4
-
-
-class TestFilterToRange:
-    def test_filters_by_quarter(self):
+class TestFilterToPeriods:
+    def test_keeps_matching_quarters(self):
         df = pl.DataFrame({
             "year": [2024, 2024, 2024, 2024],
             "qtr": [1, 2, 3, 4],
             "value": [10, 20, 30, 40],
         })
-        result = _filter_to_range(df, date(2024, 4, 1), date(2024, 9, 30))
+        result = _filter_to_periods(df, {(2024, 2), (2024, 3)})
         assert len(result) == 2
         assert result["qtr"].to_list() == [2, 3]
 
@@ -59,9 +25,23 @@ class TestFilterToRange:
             "qtr": [3, 4, 1, 2],
             "value": [10, 20, 30, 40],
         })
-        result = _filter_to_range(df, date(2023, 10, 1), date(2024, 3, 31))
+        result = _filter_to_periods(df, {(2023, 4), (2024, 1)})
         assert len(result) == 2
         assert result["year"].to_list() == [2023, 2024]
+
+
+class TestRefDateFromQuarter:
+    def test_q1(self):
+        assert _ref_date_from_quarter(2024, 1) == date(2024, 3, 12)
+
+    def test_q2(self):
+        assert _ref_date_from_quarter(2024, 2) == date(2024, 6, 12)
+
+    def test_q3(self):
+        assert _ref_date_from_quarter(2024, 3) == date(2024, 9, 12)
+
+    def test_q4(self):
+        assert _ref_date_from_quarter(2024, 4) == date(2024, 12, 12)
 
 
 class TestDownloadQCEW:
@@ -81,8 +61,10 @@ class TestDownloadQCEW:
 
         from bls_stats.download.qcew import download_qcew
 
-        df = download_qcew(date(2024, 1, 1), date(2024, 3, 31), out_dir=tmp_path)
+        df = download_qcew([(2024, 1)], out_dir=tmp_path)
 
         assert len(df) == 3
+        assert "ref_date" in df.columns
         assert "downloaded" in df.columns
+        assert df["ref_date"][0] == date(2024, 3, 12)
         assert (tmp_path / "qcew_estimates.parquet").exists()

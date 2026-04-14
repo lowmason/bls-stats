@@ -9,7 +9,7 @@ U.S. Bureau of Labor Statistics and scraping publication release dates from thei
 
 - **Multi-program downloads** — QCEW (bulk zip), CES, SAE, BED, and JOLTS (public flat files).
 - **BLS program registry** — structured series-ID field definitions for positional parsing.
-- **Release-date scraping** — extract publication dates from BLS archive pages.
+- **Release-date scraping** — extract publication dates from BLS archive pages or Atom feeds.
 - **Polars DataFrames** — all downloads return tidy Polars DataFrames with a common schema.
 - **CLI** — `bls-stats download` and `bls-stats release-dates` commands.
 
@@ -34,10 +34,11 @@ bls-stats download --program qcew --start-date 2024-01 --end-date 2024-06
 Or use the library directly:
 
 ```python
-from datetime import date
+from bls_stats.bls import reference_periods
 from bls_stats.download import download_qcew
 
-df = download_qcew(date(2024, 1, 1), date(2024, 6, 1))
+periods = reference_periods("qcew", "2024/Q1", "2024/Q2")
+df = download_qcew(periods)
 print(df.head())
 ```
 

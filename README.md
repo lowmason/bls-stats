@@ -10,7 +10,8 @@ All downloads return tidy [Polars](https://pola.rs/) DataFrames.
 
 - **Multi-program downloads** — QCEW (bulk zip), CES, SAE, BED, and JOLTS (public flat files).
 - **BLS program registry** — structured series-ID field definitions for positional parsing.
-- **Release-date scraping** — extract publication dates from BLS archive pages.
+- **Release-date scraping** — extract publication dates from BLS archive pages or Atom feeds.
+- **Reference-period helpers** — generate `(year, period)` tuples for monthly and quarterly programs.
 - **Polars DataFrames** — all downloads return tidy DataFrames with a common schema.
 - **CLI** — `bls-stats download` and `bls-stats release-dates` commands.
 
@@ -47,17 +48,26 @@ bls-stats download --program qcew --year 2024
 bls-stats download --program ces --start-date 2024-01 --end-date 2024-06
 
 # Scrape release dates
-bls-stats release-dates --program jolts --max-releases 10
+bls-stats release-dates --program jolts
+
+# Poll Atom feeds instead of scraping HTML
+bls-stats release-dates --feed
 ```
 
 ### Python
 
 ```python
-from datetime import date
+from bls_stats.bls import reference_periods
 from bls_stats.download import download_qcew, download_ces
 
-df = download_qcew(date(2024, 1, 1), date(2024, 6, 1))
+# QCEW — quarterly periods
+periods = reference_periods("qcew", "2024/Q1", "2024/Q2")
+df = download_qcew(periods)
 print(df.head())
+
+# CES — monthly periods
+periods = reference_periods("ces", "2024/01", "2024/06")
+df = download_ces(periods)
 ```
 
 ## Documentation

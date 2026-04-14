@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import polars as pl
 
-from bls_stats.download.ces import _period_to_month, _add_parsed_fields, _filter_to_range
+from bls_stats.download.ces import _period_to_month, _filter_to_periods
 
 
 class TestPeriodToMonth:
@@ -25,28 +25,16 @@ class TestPeriodToMonth:
         assert _period_to_month("MAB") is None
 
 
-class TestAddParsedFields:
-    def test_parses_series_id(self):
-        # CES0000000001 -> 13 chars: prefix(2) + seasonal(1) + supersector(2) + industry(6) + data_type(2)
-        df = pl.DataFrame({
-            "series_id": ["CEU0000000001"],
-        })
-        result = _add_parsed_fields(df)
-        assert result["seasonal"][0] == "U"
-        assert result["supersector"][0] == "00"
-        assert result["industry"][0] == "000000"
-        assert result["data_type"][0] == "01"
-
-
-class TestFilterToRange:
-    def test_filters_months(self):
+class TestFilterToPeriods:
+    def test_keeps_matching_periods(self):
         df = pl.DataFrame({
             "year": [2024, 2024, 2024],
             "period": ["M01", "M06", "M12"],
             "value": [10, 20, 30],
         })
-        result = _filter_to_range(df, date(2024, 1, 1), date(2024, 6, 30))
+        result = _filter_to_periods(df, {(2024, 1), (2024, 6)})
         assert len(result) == 2
+        assert result["value"].to_list() == [10, 20]
 
     def test_excludes_annual_avg(self):
         df = pl.DataFrame({
@@ -54,8 +42,17 @@ class TestFilterToRange:
             "period": ["M01", "M13"],
             "value": [10, 20],
         })
-        result = _filter_to_range(df, date(2024, 1, 1), date(2024, 12, 31))
+        result = _filter_to_periods(df, {(2024, 1), (2024, 13)})
         assert len(result) == 1
+
+    def test_ref_date_day_is_12(self):
+        df = pl.DataFrame({
+            "year": [2024],
+            "period": ["M03"],
+            "value": [10],
+        })
+        result = _filter_to_periods(df, {(2024, 3)})
+        assert result["ref_date"][0] == date(2024, 3, 12)
 
 
 class TestDownloadCES:
@@ -71,9 +68,12 @@ class TestDownloadCES:
 
         from bls_stats.download.ces import download_ces
 
-        df = download_ces(date(2024, 1, 1), date(2024, 3, 31), out_dir=tmp_path)
+        df = download_ces([(2024, 1)], out_dir=tmp_path)
 
         assert len(df) == 1
-        assert df["source"][0] == "ces"
-        assert df["geographic_type"][0] == "national"
+        assert set(df.columns) == {
+            "series_id", "year", "period", "value", "footnote_codes",
+            "month", "ref_date", "downloaded",
+        }
+        assert df["ref_date"][0] == date(2024, 1, 12)
         assert (tmp_path / "ces_estimates.parquet").exists()

@@ -7,10 +7,8 @@ import polars as pl
 
 from bls_stats.download.jolts import (
     _period_to_month,
-    _classify_geo,
-    _add_parsed_fields,
-    _filter_to_range,
-    REGION_CODES,
+    _last_business_day,
+    _filter_to_periods,
 )
 
 
@@ -34,46 +32,34 @@ class TestPeriodToMonth:
         assert _period_to_month("MAB") is None
 
 
-class TestClassifyGeo:
-    def test_national(self):
-        assert _classify_geo("00", "00000") == ("national", "US")
+class TestLastBusinessDay:
+    def test_month_ending_on_friday(self):
+        # Jan 2024 ends on Wednesday
+        assert _last_business_day(2024, 1) == date(2024, 1, 31)
 
-    def test_region(self):
-        for code in REGION_CODES:
-            gt, gc = _classify_geo(code, "00000")
-            assert gt == "region"
-            assert gc == code
+    def test_month_ending_on_saturday(self):
+        # Mar 2024 ends on Sunday -> last business day is Friday 29th
+        assert _last_business_day(2024, 3) == date(2024, 3, 29)
 
-    def test_state(self):
-        assert _classify_geo("06", "00000") == ("state", "06")
+    def test_month_ending_on_sunday(self):
+        # Jun 2024 ends on Sunday -> last business day is Friday 28th
+        assert _last_business_day(2024, 6) == date(2024, 6, 28)
 
-    def test_area(self):
-        assert _classify_geo("06", "31080") == ("area", "0631080")
-
-
-class TestAddParsedFields:
-    def test_parses_series_id(self):
-        # JTS000000000000000JOL -> 21 chars
-        df = pl.DataFrame({
-            "series_id": ["JTS000000000000000JOL"],
-        })
-        result = _add_parsed_fields(df)
-        assert result["seasonal"][0] == "S"
-        assert result["industry_code"][0] == "000000"
-        assert result["state_code"][0] == "00"
-        assert result["area_code"][0] == "00000"
-        assert result["rate_level"][0] == "L"
+    def test_feb_leap_year(self):
+        # Feb 2024 (leap) ends on Thursday
+        assert _last_business_day(2024, 2) == date(2024, 2, 29)
 
 
-class TestFilterToRange:
-    def test_filters_months(self):
+class TestFilterToPeriods:
+    def test_keeps_matching_periods(self):
         df = pl.DataFrame({
             "year": [2024, 2024, 2024],
             "period": ["M01", "M06", "M12"],
             "value": [10, 20, 30],
         })
-        result = _filter_to_range(df, date(2024, 1, 1), date(2024, 6, 30))
+        result = _filter_to_periods(df, {(2024, 1), (2024, 6)})
         assert len(result) == 2
+        assert result["value"].to_list() == [10, 20]
 
     def test_excludes_m13(self):
         df = pl.DataFrame({
@@ -81,8 +67,27 @@ class TestFilterToRange:
             "period": ["M01", "M13"],
             "value": [10, 20],
         })
-        result = _filter_to_range(df, date(2024, 1, 1), date(2024, 12, 31))
+        result = _filter_to_periods(df, {(2024, 1)})
         assert len(result) == 1
+
+    def test_ref_date_is_last_business_day(self):
+        df = pl.DataFrame({
+            "year": [2024],
+            "period": ["M03"],
+            "value": [10],
+        })
+        result = _filter_to_periods(df, {(2024, 3)})
+        assert result["ref_date"][0] == date(2024, 3, 29)
+
+    def test_month_not_in_output(self):
+        df = pl.DataFrame({
+            "year": [2024],
+            "period": ["M01"],
+            "value": [10],
+        })
+        result = _filter_to_periods(df, {(2024, 1)})
+        assert "month" not in result.columns
+        assert "_month" not in result.columns
 
 
 class TestDownloadJOLTS:
@@ -98,9 +103,12 @@ class TestDownloadJOLTS:
 
         from bls_stats.download.jolts import download_jolts
 
-        df = download_jolts(date(2024, 1, 1), date(2024, 3, 31), out_dir=tmp_path)
+        df = download_jolts([(2024, 1)], out_dir=tmp_path)
 
         assert len(df) == 1
-        assert df["source"][0] == "jolts"
-        assert df["geographic_type"][0] == "national"
+        assert set(df.columns) == {
+            "series_id", "year", "period", "value", "footnote_codes",
+            "ref_date", "downloaded",
+        }
+        assert df["ref_date"][0] == date(2024, 1, 31)
         assert (tmp_path / "jolts_estimates.parquet").exists()

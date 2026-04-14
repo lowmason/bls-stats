@@ -52,20 +52,32 @@ bls-stats download --program bed --start-date 2024-03
 
 ## `release-dates`
 
-Scrape BLS archive pages for publication release dates.
+Scrape BLS archive pages (or poll Atom feeds) for publication release dates.
 
 ```
-bls-stats release-dates [--program PROGRAM] [--max-releases N]
+bls-stats release-dates [--program PROGRAM] [--feed]
 ```
 
-| Option            | Required | Description                                        |
-|-------------------|----------|----------------------------------------------------|
-| `--program`       | No       | Scrape a single program (default: all)              |
-| `--max-releases`  | No       | Max releases to scrape per publication               |
+| Option      | Required | Description                                              |
+|-------------|----------|----------------------------------------------------------|
+| `--program` | No       | Scrape a single program (default: all)                    |
+| `--feed`    | No       | Use Atom feed polling instead of HTML scraping            |
+
+By default the command scrapes BLS archive and schedule HTML pages.
+Pass `--feed` to poll the Atom RSS feeds instead.
 
 ### Examples
 
 ```bash
+# Scrape all programs (archive + schedule HTML)
 bls-stats release-dates
-bls-stats release-dates --program jolts --max-releases 10
+
+# Scrape a single program
+bls-stats release-dates --program jolts
+
+# Poll Atom feeds instead of scraping
+bls-stats release-dates --feed
+
+# Poll a single program's feed
+bls-stats release-dates --program ces --feed
 ```

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 BLS_ARCHIVE_BASE = "https://www.bls.gov/bls/news-release"
 BLS_SCHEDULE_BASE = "https://www.bls.gov/schedule/news_release"
+BLS_FEED_BASE = "https://www.bls.gov/feed"
+LAPSE_URL = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm"
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,10 @@ class Publication:
     frequency: str  # "monthly" or "quarterly"
     archive_url: str
     schedule_url: str = ""
+
+    @property
+    def feed_url(self) -> str:
+        return f"{BLS_FEED_BASE}/{self.series}.rss"
 
 
 PUBLICATIONS: dict[str, Publication] = {}
@@ -51,6 +57,7 @@ QCEW_PUB = _register(
         series="cewqtr",
         frequency="quarterly",
         archive_url=f"{BLS_ARCHIVE_BASE}/cewqtr.htm",
+        schedule_url=f"{BLS_SCHEDULE_BASE}/cewbd.htm",
     )
 )
 
@@ -60,6 +67,7 @@ BED_PUB = _register(
         series="cewbd",
         frequency="quarterly",
         archive_url=f"{BLS_ARCHIVE_BASE}/cewbd.htm",
+        schedule_url=f"{BLS_SCHEDULE_BASE}/cewbd.htm",
     )
 )
 
