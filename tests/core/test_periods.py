@@ -7,7 +7,10 @@ from bls_stats.core.periods import PeriodError, ref_date, reference_periods, shi
 
 def test_monthly_inclusive_range() -> None:
     assert reference_periods("ces", "2025/11", "2026/02") == [
-        (2025, 11), (2025, 12), (2026, 1), (2026, 2),
+        (2025, 11),
+        (2025, 12),
+        (2026, 1),
+        (2026, 2),
     ]
 
 
@@ -18,8 +21,12 @@ def test_quarterly_and_annual_parsing() -> None:
 
 @pytest.mark.parametrize(
     ("program", "start", "end"),
-    [("ces", "2026/13", "2026/13"), ("qcew", "2026/5", "2026/5"),
-     ("ces", "2026/03", "2026/01"), ("nope", "2026/01", "2026/01")],
+    [
+        ("ces", "2026/13", "2026/13"),
+        ("qcew", "2026/5", "2026/5"),
+        ("ces", "2026/03", "2026/01"),
+        ("nope", "2026/01", "2026/01"),
+    ],
 )
 def test_invalid_inputs_raise(program: str, start: str, end: str) -> None:
     with pytest.raises(PeriodError):

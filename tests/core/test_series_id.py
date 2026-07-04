@@ -6,8 +6,11 @@ from bls_stats.core.series_id import SeriesIdError, decode
 def test_decode_ces() -> None:
     parts = decode("CES0500000003")
     assert parts == {
-        "prefix": "CE", "seasonal": "S", "supersector": "05",
-        "industry": "000000", "data_type": "03",
+        "prefix": "CE",
+        "seasonal": "S",
+        "supersector": "05",
+        "industry": "000000",
+        "data_type": "03",
     }
 
 

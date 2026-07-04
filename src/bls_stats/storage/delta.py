@@ -48,8 +48,12 @@ class VintageStore:
         return self._scan(self.observations_uri(program))
 
     def slot_exists(
-        self, program: str, ref_date: date | None, release_date: date,
-        revision: int | None, benchmark: int | None,
+        self,
+        program: str,
+        ref_date: date | None,
+        release_date: date,
+        revision: int | None,
+        benchmark: int | None,
     ) -> bool:
         lf = self.scan_observations(program)
         if lf is None:

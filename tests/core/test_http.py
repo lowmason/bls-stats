@@ -71,8 +71,9 @@ def test_download_retries_5xx_then_succeeds(tmp_path) -> None:
 
     from bls_stats.core.http import download
 
-    dest = download(_client_with(handler), "https://example.com/f", tmp_path / "f.txt",
-                    sleep=lambda _s: None)
+    dest = download(
+        _client_with(handler), "https://example.com/f", tmp_path / "f.txt", sleep=lambda _s: None
+    )
     assert dest.read_text() == "payload"
     assert len(calls) == 2
 
@@ -81,7 +82,7 @@ def test_throttle_waits_only_when_needed() -> None:
     now = {"t": 0.0}
     slept: list[float] = []
     th = Throttle(2.0, clock=lambda: now["t"], sleep=lambda s: slept.append(s))
-    th.wait()          # first call: no sleep
+    th.wait()  # first call: no sleep
     now["t"] = 0.5
-    th.wait()          # 1.5s remaining
+    th.wait()  # 1.5s remaining
     assert slept == [1.5]

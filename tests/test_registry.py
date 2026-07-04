@@ -39,7 +39,11 @@ def test_profiles_match_spec_table() -> None:  # ARCH §2.1/§2.2
 def test_unit_columns() -> None:  # ARCH §4.3
     assert REGISTRY["ces"].unit_columns == ("series_id",)
     assert REGISTRY["qcew"].unit_columns == (
-        "area_fips", "own_code", "industry_code", "agglvl_code", "size_code",
+        "area_fips",
+        "own_code",
+        "industry_code",
+        "agglvl_code",
+        "size_code",
     )
     assert REGISTRY["ep"].unit_columns == ("occupation_code", "industry_code")
 

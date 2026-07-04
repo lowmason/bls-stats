@@ -7,16 +7,27 @@ import pytest
 from bls_stats.storage.delta import VintageStore
 
 
-def obs_frame(ref: date, rel: date, revision: int | None, benchmark: int | None,
-              source: str = "increment", value: float = 1.0) -> pl.DataFrame:
-    return pl.DataFrame({
-        "series_id": ["CES0000000001"], "value": [value], "footnote_codes": [""],
-        "ref_date": [ref], "release_date": [rel],
-        "revision": pl.Series([revision], dtype=pl.Int16),
-        "benchmark": pl.Series([benchmark], dtype=pl.Int16),
-        "source": [source],
-        "downloaded": [datetime(2026, 7, 2, 13, 0, tzinfo=UTC)],
-    })
+def obs_frame(
+    ref: date,
+    rel: date,
+    revision: int | None,
+    benchmark: int | None,
+    source: str = "increment",
+    value: float = 1.0,
+) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "series_id": ["CES0000000001"],
+            "value": [value],
+            "footnote_codes": [""],
+            "ref_date": [ref],
+            "release_date": [rel],
+            "revision": pl.Series([revision], dtype=pl.Int16),
+            "benchmark": pl.Series([benchmark], dtype=pl.Int16),
+            "source": [source],
+            "downloaded": [datetime(2026, 7, 2, 13, 0, tzinfo=UTC)],
+        }
+    )
 
 
 @pytest.fixture()
