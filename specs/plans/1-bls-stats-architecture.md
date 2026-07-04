@@ -3563,6 +3563,8 @@ from bls_stats.vintage.ledger import Ledger
 
 NOW = datetime(2026, 7, 2, 13, 0, tzinfo=timezone.utc)
 CLOCK = lambda: NOW  # noqa: E731
+LATER = datetime(2026, 8, 7, 13, 0, tzinfo=timezone.utc)
+LATER_CLOCK = lambda: LATER  # noqa: E731
 JUNE_RELEASE = Release("ces", date(2026, 7, 2), 2026, 6, False)
 
 
@@ -3637,14 +3639,14 @@ def test_stale_file_defers_and_exits_zero(store) -> None:
 
 def test_deferred_event_retried_next_run(store) -> None:
     _ingest(store, fresh_fn=lambda client, program, rd: False)
-    assert _ingest(store) == 0  # file now fresh
+    assert _ingest(store, clock=LATER_CLOCK) == 0  # file now fresh (later run)
     assert (Ledger(store).resolved()["status"] == "ingested").all()
 
 
 def test_superseded_deferred_becomes_missed(store) -> None:  # ARCH §5.3 transition
     _ingest(store, fresh_fn=lambda client, program, rd: False)  # June deferred
     july = Release("ces", date(2026, 8, 7), 2026, 7, False)
-    _ingest(store, poll_fn=lambda client, programs: [july])     # newer release ingests
+    _ingest(store, clock=LATER_CLOCK, poll_fn=lambda client, programs: [july])  # newer release ingests (later run)
     led = Ledger(store).resolved()
     june = led.filter(pl.col("release_date") == date(2026, 7, 2))
     assert june.height == 3 and (june["status"] == "missed").all()
