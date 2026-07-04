@@ -47,3 +47,19 @@ def test_enrich_left_joins_never_drop_rows() -> None:  # BEH §2.5
 def test_enrich_resolves_footnotes() -> None:
     out = enrich(_obs(), _meta())
     assert out.filter(pl.col("series_id") == "LNS14000000")["footnote_text"][0] == "Preliminary."
+
+
+def test_enrich_resolves_multi_code_footnotes() -> None:
+    obs = pl.DataFrame({"series_id": ["LNS14000000"], "value": [4.2], "footnote_codes": ["P,C"]})
+    meta = _meta()
+    meta["footnote"] = pl.DataFrame(
+        {"footnote_code": ["P", "C"], "footnote_text": ["Preliminary.", "Corrected."]}
+    )
+    out = enrich(obs, meta)
+    assert out.height == 1
+    assert out["footnote_text"][0] == "Preliminary.; Corrected."
+
+
+def test_enrich_empty_footnote_codes_resolve_null() -> None:
+    out = enrich(_obs(), _meta())
+    assert out.filter(pl.col("series_id") == "LNU99999999")["footnote_text"][0] is None
