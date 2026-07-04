@@ -2603,12 +2603,12 @@ def parse_flat_file(
     period_re = r"^M(0[1-9]|1[0-2])$" if spec.frequency == Frequency.MONTHLY else r"^Q0[1-4]$"
     lf = (
         pl.scan_csv(
-            path, separator="\t",
-            schema_overrides={"series_id": pl.Utf8, "year": pl.Int32,
-                              "period": pl.Utf8, "value": pl.Utf8, "footnote_codes": pl.Utf8},
+            path, separator="\t", infer_schema=False,
             missing_utf8_is_empty_string=True,
         )
+        .rename(lambda c: c.strip())  # LABSTAT headers are space-padded
         .with_columns(pl.col("series_id", "period", "value", "footnote_codes").str.strip_chars())
+        .with_columns(pl.col("year").str.strip_chars().cast(pl.Int32))
         .filter(pl.col("period").str.contains(period_re))  # drops M13 (BEH §2.1)
         .with_columns(
             pl.col("period").str.slice(1).cast(pl.Int8).alias("_pnum"),
