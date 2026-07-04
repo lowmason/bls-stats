@@ -3500,8 +3500,15 @@ def enrich(obs: pl.DataFrame, meta: dict[str, pl.DataFrame]) -> pl.DataFrame:
         if code_col in out.columns:
             out = out.join(mapping, on=code_col, how="left")
     if "footnote" in meta and "footnote_codes" in out.columns:
-        out = out.join(
-            meta["footnote"], left_on="footnote_codes", right_on="footnote_code", how="left"
+        lookup = dict(meta["footnote"].select("footnote_code", "footnote_text").iter_rows())
+        out = out.with_columns(
+            pl.col("footnote_codes")
+            .str.split(",")
+            .list.eval(pl.element().str.strip_chars().replace_strict(lookup, default=None))
+            .list.drop_nulls()
+            .list.join("; ")
+            .replace("", None)
+            .alias("footnote_text")
         )
     assert out.height == before, "enrichment must never drop observations (BEH §2.5)"
     return out
