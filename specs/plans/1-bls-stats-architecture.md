@@ -1252,18 +1252,18 @@ VINTAGES = frame([
 
 def test_latest_picks_max_release_date() -> None:
     out = latest(VINTAGES, ["series_id"]).collect()
-    assert out.height == 1 and out["v"][0] == 3.0
+    assert out.height == 1 and out["value"][0] == 3.0
 
 
 def test_as_of_never_leaks_future() -> None:  # the ARCH §9 crown-jewel invariant
     out = as_of(VINTAGES, ["series_id"], date(2026, 6, 15)).collect()
-    assert out["v"][0] == 2.0
+    assert out["value"][0] == 2.0
     assert (out["release_date"] <= date(2026, 6, 15)).all()
 
 
 def test_as_of_inclusive_of_release_day() -> None:
     out = as_of(VINTAGES, ["series_id"], date(2026, 6, 1)).collect()
-    assert out["v"][0] == 2.0
+    assert out["value"][0] == 2.0
 
 
 def test_tiebreak_prefers_increment_then_counters() -> None:  # ARCH §4.4
@@ -1273,12 +1273,12 @@ def test_tiebreak_prefers_increment_then_counters() -> None:  # ARCH §4.4
         {"ref": date(2026, 4, 12), "rel": date(2026, 7, 1), "rev": 2, "bm": 1, "v": 20.0},
     ])
     out = latest(lf, ["series_id"]).collect()
-    assert out.height == 1 and out["v"][0] == 20.0
+    assert out.height == 1 and out["value"][0] == 20.0
 
 
 def test_prints_filters_on_counters() -> None:
     out = prints(VINTAGES, revision=1).collect()
-    assert out.height == 1 and out["v"][0] == 2.0
+    assert out.height == 1 and out["value"][0] == 2.0
 ```
 
 - [ ] **Step 2: Run to verify failure** — `uv run pytest tests/storage/test_reads.py -v`
