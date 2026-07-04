@@ -23,9 +23,13 @@ PROGRAMS = ["ces", "sae", "jolts", "cps", "bed", "qcew", "oews", "ep"]
 
 def _setup() -> tuple:
     settings = load_settings()
+    level = logging.getLevelNamesMapping().get(settings.log_level.upper())
+    if level is None:
+        typer.echo(f"unknown BLS_LOG_LEVEL {settings.log_level!r} — using INFO", err=True)
+        level = logging.INFO
     logging.basicConfig(
         stream=sys.stderr,
-        level=settings.log_level,
+        level=level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     from bls_stats.storage.delta import VintageStore
@@ -59,7 +63,11 @@ def backfill(
 
     settings, store = _setup()
     if program == "qcew":
-        years = sorted({y for y, _ in reference_periods("qcew", start, end)})
+        try:
+            years = sorted({y for y, _ in reference_periods("qcew", start, end)})
+        except ValueError as exc:  # PeriodError subclasses ValueError
+            typer.echo(f"qcew: {exc}", err=True)
+            raise typer.Exit(2) from None
         codes = [
             pipeline.run_backfill(settings, store, "qcew", f"{y}/1", f"{y}/4", dry_run=dry_run)
             for y in years
