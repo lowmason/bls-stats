@@ -81,9 +81,11 @@ class VintageStore:
         # missing table doesn't raise until the plan is resolved (e.g. on collect()).
         # Force resolution here with a cheap schema probe so callers reliably get None
         # for an absent table instead of a LazyFrame that blows up later.
+        # This tuple is deliberately narrow: transient I/O and permission errors PROPAGATE
+        # rather than masquerade as "table absent" to prevent duplicate append scenarios.
         try:
             lf = pl.scan_delta(uri, storage_options=self.storage_options)
             lf.collect_schema()
             return lf
-        except (TableNotFoundError, FileNotFoundError, OSError):
+        except (TableNotFoundError, FileNotFoundError):
             return None
