@@ -1,5 +1,7 @@
 # bls-stats Implementation Plan
 
+> **STATUS: COMPLETE** (2026-07-04) — all 22 tasks implemented and reviewed on branch `impl-plan-1` (commits `e5e96f4..63d58c9`); final whole-branch review clean after one consolidated fix wave. Deferred minors and post-plan items: `.sdd/progress.md` and ARCH §12.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the `bls-stats` package: vintage-aware download of eight BLS data products with two-stage ingest (bulk backfill + daily feed-driven increments) into a Delta Lake store on S3-compatible storage.
