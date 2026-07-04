@@ -3556,7 +3556,7 @@ import polars as pl
 import pytest
 
 from bls_stats.core.config import Settings
-from bls_stats.pipeline import run_ingest, stamp
+from bls_stats.pipeline import run_backfill, run_ingest, stamp
 from bls_stats.releases.feeds import Release
 from bls_stats.storage.delta import VintageStore
 from bls_stats.vintage.ledger import Ledger
@@ -3677,6 +3677,30 @@ def test_stamp_types() -> None:
         date(2026, 6, 12), date(2026, 7, 2), 0, 0, "increment", NOW,
     )
     assert df.schema["revision"] == pl.Int16 and df.schema["source"] == pl.Utf8
+
+
+def _seed_calendar(store) -> None:
+    store.append_state("release_calendar", pl.DataFrame({
+        "program": ["ces"],
+        "ref_date": [date(2026, 6, 12)],
+        "release_date": [date(2026, 7, 2)],
+        "original_release": pl.Series([None], dtype=pl.Date),
+        "is_benchmark": [False],
+    }))
+
+
+def test_backfill_without_calendar_exits_two(store) -> None:
+    assert run_backfill(Settings(), store, "ces", "2020/01", "2020/12", clock=CLOCK) == 2
+
+
+def test_backfill_program_missing_from_calendar_exits_two(store) -> None:
+    _seed_calendar(store)
+    assert run_backfill(Settings(), store, "jolts", "2020/01", "2020/12", clock=CLOCK) == 2
+
+
+def test_backfill_malformed_range_exits_two(store) -> None:
+    _seed_calendar(store)
+    assert run_backfill(Settings(), store, "ces", "2020-01", "2020-12", clock=CLOCK) == 2
 ```
 
 - [ ] **Step 2: Run to verify failure** — `uv run pytest tests/test_pipeline.py -v`
@@ -3910,7 +3934,11 @@ def run_backfill(
     if cal is None:
         log.error("release calendar missing — run `bls-stats calendar build` first (ARCH §8)")
         return 2
-    periods = filter_published(program, reference_periods(program, start, end), cal)
+    try:
+        periods = filter_published(program, reference_periods(program, start, end), cal)
+    except ValueError as exc:  # PeriodError subclasses ValueError; also empty program calendar
+        log.error("%s: %s", program, exc)
+        return 2
     if not periods:
         log.warning("%s: no published periods in range", program)
         return 0
