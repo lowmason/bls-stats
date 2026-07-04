@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>BLS Latest Numbers</title>
+  <entry>
+    <id>empsit-2026_07_02__08_30_00</id>
+    <title>Both payroll employment (+57,000) and unemployment rate (4.2%) change little in June</title>
+    <link href="https://www.bls.gov/news.release/archives/empsit_07022026.htm"/>
+    <content type="text">Total nonfarm payroll employment changed little in June.</content>
+    <published>2026-07-02T08:30:00-04:00</published>
+    <updated>2026-07-02T08:30:00-04:00</updated>
+  </entry>
+  <entry>
+    <id>empsit-2026_02_11__08_30_00</id>
+    <title>Payroll employment rises by 130,000 in January; unemployment rate changes little at 4.3%</title>
+    <link href="https://www.bls.gov/news.release/archives/empsit_02112026.htm"/>
+    <content type="text">Employment rose in January.</content>
+    <published>2026-02-11T08:30:00-05:00</published>
+    <updated>2026-02-11T08:30:00-05:00</updated>
+  </entry>
+  <entry>
+    <id>empsit-2025_11_20__08_30_00</id>
+    <title>Payroll employment increases in September; unemployment rate changes little</title>
+    <link href="https://www.bls.gov/news.release/archives/empsit_11202025.htm"/>
+    <content type="text">Delayed by the lapse in federal funding.</content>
+    <published>2025-11-20T08:30:00-05:00</published>
+    <updated>2025-11-20T08:30:00-05:00</updated>
+  </entry>
+</feed>
