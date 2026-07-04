@@ -299,7 +299,7 @@ Expected: 5 passed.
 - Produces (consumed by *every* later task):
   - `Frequency` (StrEnum: `MONTHLY|QUARTERLY|ANNUAL|NONE`), `RefDateRule` (StrEnum: `DAY_12|LAST_BUSINESS_DAY|QUARTER_END_12|MAY_12|NONE`)
   - `RevisionProfile(routine_slots: int, routine_rule: str, benchmark_rule: str | None, benchmark_window_years: int | None)` — `routine_rule` ∈ {`"fixed"`, `"year_to_date"`}; `benchmark_rule` ∈ {`"jan_data"`, `"q1_data"`, None}
-  - `ProgramSpec(name, frequency, ref_date_rule, series_prefix, series_layout, unit_columns, backfill_url, increment_url, benchmark_url, feed_url, archive_url, schedule_url, release_time_et, profile, row_band, null_rate_max)`
+  - `ProgramSpec(name, frequency, ref_date_rule, series_prefix, unit_columns, backfill_url, increment_url, benchmark_url, feed_url, archive_url, schedule_url, release_time_et, profile, row_band, null_rate_max)` — series-ID layouts live in the separate `SERIES_LAYOUTS` dict (prefix-keyed), not on the spec
   - `REGISTRY: dict[str, ProgramSpec]` with keys `ces sae jolts cps bed qcew oews ep`
   - `SERIES_LAYOUTS: dict[str, tuple[tuple[str, int], ...]]` keyed by 2-char prefix (`CE SM BD JT LN OE EP`)
 
