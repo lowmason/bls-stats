@@ -4026,6 +4026,26 @@ def test_ingest_exit_code_propagates(monkeypatch, tmp_path) -> None:
 def test_backfill_requires_program_and_range() -> None:
     result = runner.invoke(app, ["backfill"])
     assert result.exit_code != 0
+
+
+def test_backfill_qcew_malformed_range_exits_two(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(
+        app, ["backfill", "--program", "qcew", "--start", "2020-13", "--end", "2020/1"]
+    )
+    assert result.exit_code == 2
+
+
+def test_bad_log_level_falls_back_to_info(monkeypatch, tmp_path) -> None:
+    import logging
+
+    from bls_stats.cli import _setup
+
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    monkeypatch.setenv("BLS_LOG_LEVEL", "verbose")
+    logging.getLogger().handlers.clear()
+    settings, _ = _setup()  # must not raise (falls back to INFO)
+    assert settings.log_level == "verbose"
 ```
 
 - [ ] **Step 2: Run to verify failure** — `uv run pytest tests/test_cli.py -v`
@@ -4058,8 +4078,12 @@ PROGRAMS = ["ces", "sae", "jolts", "cps", "bed", "qcew", "oews", "ep"]
 
 def _setup() -> tuple:
     settings = load_settings()
+    level = logging.getLevelNamesMapping().get(settings.log_level.upper())
+    if level is None:
+        typer.echo(f"unknown BLS_LOG_LEVEL {settings.log_level!r} — using INFO", err=True)
+        level = logging.INFO
     logging.basicConfig(
-        stream=sys.stderr, level=settings.log_level,
+        stream=sys.stderr, level=level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     from bls_stats.storage.delta import VintageStore
@@ -4093,7 +4117,11 @@ def backfill(
 
     settings, store = _setup()
     if program == "qcew":
-        years = sorted({y for y, _ in reference_periods("qcew", start, end)})
+        try:
+            years = sorted({y for y, _ in reference_periods("qcew", start, end)})
+        except ValueError as exc:  # PeriodError subclasses ValueError
+            typer.echo(f"qcew: {exc}", err=True)
+            raise typer.Exit(2) from None
         codes = [
             pipeline.run_backfill(settings, store, "qcew", f"{y}/1", f"{y}/4", dry_run=dry_run)
             for y in years
