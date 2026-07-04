@@ -9,6 +9,9 @@ import polars as pl
 
 
 class Store(Protocol):
+    uri: str
+    storage_options: dict[str, str] | None
+
     def observations_uri(self, program: str) -> str: ...
     def append_observations(self, program: str, df: pl.DataFrame) -> None: ...
     def scan_observations(self, program: str) -> pl.LazyFrame | None: ...
