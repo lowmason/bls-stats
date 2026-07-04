@@ -9,6 +9,8 @@ from bls_stats.releases.calendar import LAPSE_URLS
 
 FIXTURES = Path("tests/fixtures")
 
+_LABSTAT_PROGRAMS = ("ces", "sae", "jolts", "cps", "bed")
+
 
 def capture_feeds() -> None:
     client = build_client(load_settings())
@@ -38,8 +40,32 @@ def capture_calendar_pages() -> None:
         print("captured", name)
 
 
+def capture_labstat() -> None:
+    """Range-request the first ~200 lines of each LABSTAT program's increment file."""
+    client = build_client(load_settings())
+    throttle = Throttle(2.0)
+    for program in _LABSTAT_PROGRAMS:
+        spec = REGISTRY[program]
+        url = spec.increment_url
+        if url is None:
+            continue
+        throttle.wait()
+        resp = client.get(url, headers={"Range": "bytes=0-20000"})
+        resp.raise_for_status()
+        text = resp.content.decode("utf-8", errors="replace")
+        lines = text.splitlines(keepends=True)
+        if lines and not lines[-1].endswith("\n"):
+            lines = lines[:-1]  # trim the partial trailing line from the byte-range cut
+        prefix = spec.series_prefix.lower()
+        name = f"{prefix}.data.live.txt"
+        (FIXTURES / "labstat" / name).write_text("".join(lines))
+        print("captured", name)
+
+
 if __name__ == "__main__":
     FIXTURES.joinpath("feeds").mkdir(parents=True, exist_ok=True)
     FIXTURES.joinpath("html").mkdir(parents=True, exist_ok=True)
+    FIXTURES.joinpath("labstat").mkdir(parents=True, exist_ok=True)
     capture_feeds()
     capture_calendar_pages()
+    capture_labstat()
