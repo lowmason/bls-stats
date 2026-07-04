@@ -13,16 +13,23 @@ NO_THROTTLE = Throttle(0, clock=lambda: 0.0, sleep=lambda _s: None)
 
 
 def _payload(series: list[dict], messages: list[str] | None = None) -> dict:
-    return {"status": "REQUEST_SUCCEEDED", "message": messages or [],
-            "Results": {"series": series}}
+    return {"status": "REQUEST_SUCCEEDED", "message": messages or [], "Results": {"series": series}}
 
 
 def _series(sid: str) -> dict:
-    return {"seriesID": sid, "data": [
-        {"year": "2026", "period": "M05", "value": "159180",
-         "footnotes": [{"code": "P", "text": "Preliminary."}], "latest": "true"},
-        {"year": "2026", "period": "M04", "value": "159123", "footnotes": [{}]},
-    ]}
+    return {
+        "seriesID": sid,
+        "data": [
+            {
+                "year": "2026",
+                "period": "M05",
+                "value": "159180",
+                "footnotes": [{"code": "P", "text": "Preliminary."}],
+                "latest": "true",
+            },
+            {"year": "2026", "period": "M04", "value": "159123", "footnotes": [{}]},
+        ],
+    }
 
 
 def test_fetch_parses_rows_and_key_in_payload() -> None:
@@ -50,8 +57,9 @@ def test_batches_of_fifty() -> None:
         return httpx.Response(200, json=_payload([_series(s) for s in ids]))
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    fetch_series(client, SETTINGS, [f"S{i:03d}" for i in range(120)], 2026, 2026,
-                 throttle=NO_THROTTLE)
+    fetch_series(
+        client, SETTINGS, [f"S{i:03d}" for i in range(120)], 2026, 2026, throttle=NO_THROTTLE
+    )
     assert batches == [50, 50, 20]
 
 
