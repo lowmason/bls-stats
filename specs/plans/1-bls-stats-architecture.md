@@ -1191,7 +1191,8 @@ def test_minio_roundtrip() -> None:
     from bls_stats.core.config import Settings, storage_options as so
 
     store = VintageStore(
-        "s3://bls-stats/test-store", so(Settings(aws_endpoint_url=endpoint))
+        "s3://bls-stats/test-store",
+        so(Settings(store_uri="s3://bls-stats/test-store", aws_endpoint_url=endpoint)),
     )
     store.append_observations("ces", obs_frame(date(2026, 6, 12), date(2026, 7, 2), 0, 0))
     assert store.slot_exists("ces", date(2026, 6, 12), date(2026, 7, 2), 0, 0)
