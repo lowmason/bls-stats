@@ -314,7 +314,11 @@ def run_backfill(
     if cal is None:
         log.error("release calendar missing — run `bls-stats calendar build` first (ARCH §8)")
         return 2
-    periods = filter_published(program, reference_periods(program, start, end), cal)
+    try:
+        periods = filter_published(program, reference_periods(program, start, end), cal)
+    except ValueError as exc:  # PeriodError subclasses ValueError; also empty program calendar
+        log.error("%s: %s", program, exc)
+        return 2
     if not periods:
         log.warning("%s: no published periods in range", program)
         return 0
