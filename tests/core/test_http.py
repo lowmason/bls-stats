@@ -42,11 +42,15 @@ def test_4xx_fails_fast() -> None:
 
 
 def test_5xx_exhausts_retries() -> None:
+    calls = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
         return httpx.Response(503)
 
     with pytest.raises(httpx.HTTPStatusError):
         get(_client_with(handler), "https://example.com/x", retries=2, sleep=lambda _s: None)
+    assert len(calls) == 3  # retries=2 → 3 total attempts
 
 
 def test_head_last_modified_parses_to_utc() -> None:
@@ -56,6 +60,21 @@ def test_head_last_modified_parses_to_utc() -> None:
 
     lm = head_last_modified(_client_with(handler), "https://example.com/x")
     assert lm is not None and lm.isoformat() == "2026-07-02T12:30:00+00:00"
+
+
+def test_download_retries_5xx_then_succeeds(tmp_path) -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(500 if len(calls) < 2 else 200, text="payload")
+
+    from bls_stats.core.http import download
+
+    dest = download(_client_with(handler), "https://example.com/f", tmp_path / "f.txt",
+                    sleep=lambda _s: None)
+    assert dest.read_text() == "payload"
+    assert len(calls) == 2
 
 
 def test_throttle_waits_only_when_needed() -> None:
