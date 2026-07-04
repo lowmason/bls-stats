@@ -13,7 +13,7 @@ import polars as pl
 from bls_stats.core.config import Settings
 from bls_stats.core.http import build_client
 from bls_stats.core.periods import Period, ref_date, reference_periods
-from bls_stats.registry import REGISTRY
+from bls_stats.registry import REGISTRY, Frequency
 from bls_stats.releases import feeds
 from bls_stats.releases.calendar import filter_published
 from bls_stats.releases.profiles import Slot, expand
@@ -48,7 +48,7 @@ def stamp(
         pl.lit(downloaded).dt.cast_time_unit("us").alias("downloaded"),
     )
     if "ref_date" not in out.columns:
-        out = out.with_columns(pl.lit(ref).alias("ref_date"))
+        out = out.with_columns(pl.lit(ref, dtype=pl.Date).alias("ref_date"))
     return out
 
 
@@ -93,14 +93,13 @@ def _fetch_event(
         from bls_stats.engines.oews import fetch_year as fetch_oews
 
         return fetch_oews(client, refs[0].year, dest_dir, downloaded)
-    if program == "ep":
-        from bls_stats.engines.ep import fetch_matrix
-
-        return fetch_matrix(client, downloaded=downloaded)
+    if program == "ep":  # scrape-date vintages need a storage schema decision (ARCH §12)
+        raise ValidationError("ep fetch is not wired to the vintage store")
     from bls_stats.engines.labstat import fetch
 
     periods: list[Period] = [
-        (r.year, r.month if spec.frequency == "monthly" else (r.month + 2) // 3) for r in refs
+        (r.year, r.month if spec.frequency == Frequency.MONTHLY else (r.month + 2) // 3)
+        for r in refs
     ]
     url = (
         spec.benchmark_url
@@ -170,6 +169,11 @@ def run_ingest(
 ) -> int:
     clock = clock or _utcnow
     programs = programs or [p for p in REGISTRY if p != "ep"]  # ep: ARCH §5.2 exception
+    if "ep" in programs:
+        log.error("ep ingest is not yet wired to the vintage store (ARCH §12 open item)")
+        programs = [p for p in programs if p != "ep"]
+        if not programs:
+            return 2
     poll_fn = poll_fn or feeds.poll
     fetch_fn = fetch_fn or _fetch_event
     if fresh_fn is None:
@@ -309,6 +313,9 @@ def run_backfill(
 ) -> int:
     clock = clock or _utcnow
     now = clock()
+    if program == "ep":
+        log.error("ep is snapshot-based (no reference periods); backfill does not apply")
+        return 2
     snapshot_date = now.date()
     cal = store.read_state("release_calendar")
     if cal is None:

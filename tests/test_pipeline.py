@@ -181,3 +181,11 @@ def test_backfill_program_missing_from_calendar_exits_two(store) -> None:
 def test_backfill_malformed_range_exits_two(store) -> None:
     _seed_calendar(store)
     assert run_backfill(Settings(), store, "ces", "2020-01", "2020-12", clock=CLOCK) == 2
+
+
+def test_ingest_ep_only_exits_two(store) -> None:
+    assert run_ingest(Settings(), store, ["ep"], clock=CLOCK) == 2
+
+
+def test_backfill_ep_exits_two(store) -> None:
+    assert run_backfill(Settings(), store, "ep", "2024", "2026", clock=CLOCK) == 2
