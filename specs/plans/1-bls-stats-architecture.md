@@ -3846,13 +3846,14 @@ def run_ingest(
     failed = outcomes.count("failed")
     if failed and failed == len(outcomes):
         return 2
-    return 1 if failed else 0
+    return 1 if failed or "partial" in outcomes else 0
 
 
 def _process_event(release, slots, settings, store, ledger, client, *,
                    dry_run: bool, now: datetime, fetch_fn, fresh_fn) -> str:
     program = release.program
     label = f"{program} release {release.release_date}"
+    appended = 0
 
     def _record(status: str, slot: Slot, row_count: int = 0) -> None:
         if not dry_run:
@@ -3886,13 +3887,14 @@ def _process_event(release, slots, settings, store, ledger, client, *,
                 log.warning("%s: slot %s already committed — repairing ledger only", label, slot)
             elif not dry_run:
                 store.append_observations(program, stamped)
+                appended += 1
             _record("ingested", slot, stamped.height)
             committed += 1
         log.info("%s: %d/%d slots committed", label, committed, len(slots))
         return "ok" if committed else "deferred"
     except Exception:
         log.exception("%s: event failed", label)
-        return "failed"
+        return "partial" if appended else "failed"  # data committed => partial (ARCH §7.4)
 
 
 def run_backfill(
