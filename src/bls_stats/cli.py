@@ -324,7 +324,9 @@ def metadata_fetch(refresh: bool = typer.Option(False)) -> None:
     from bls_stats.enrich.cps import fetch_metadata
 
     settings, _ = _setup()
-    meta = fetch_metadata(build_client(settings), Path("data/cps_metadata"), refresh=refresh)
+    meta = fetch_metadata(
+        build_client(settings), Path(settings.metadata_cache_dir), refresh=refresh
+    )
     typer.echo(f"fetched {len(meta)} metadata tables")
 
 
@@ -342,7 +344,7 @@ def metadata_export() -> None:
     from bls_stats.enrich.cps import export_metadata, fetch_metadata
 
     settings, store = _setup()
-    meta = fetch_metadata(build_client(settings), Path("data/cps_metadata"))
+    meta = fetch_metadata(build_client(settings), Path(settings.metadata_cache_dir))
     export_metadata(store, meta)
     typer.echo("exported")
 
@@ -369,7 +371,7 @@ def metadata_enrich(ref_date_opt: str = typer.Option(..., "--ref-date")) -> None
         typer.echo("cps: (empty)", err=True)
         raise typer.Exit(1)
     obs = lf.filter(pl.col("ref_date") == _parse_date(ref_date_opt, "--ref-date")).collect()
-    meta = fetch_metadata(build_client(settings), Path("data/cps_metadata"))
+    meta = fetch_metadata(build_client(settings), Path(settings.metadata_cache_dir))
     typer.echo(str(enrich(obs, meta)))
 
 

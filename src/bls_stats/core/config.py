@@ -25,6 +25,8 @@ class Settings:
         log_level: stderr log verbosity, e.g. `"INFO"`.
         aws_endpoint_url: S3-compatible endpoint override (MinIO vs. a corporate endpoint
             differ by this one variable), or `None` to use the AWS default resolution.
+        metadata_cache_dir: Local cache dir for CPS dimension tables (series catalog +
+            `ln.*` mappings), configurable so it doesn't silently depend on cwd.
     """
 
     store_uri: str = "./data/store"
@@ -33,6 +35,7 @@ class Settings:
     api_key: str | None = None
     log_level: str = "INFO"
     aws_endpoint_url: str | None = None
+    metadata_cache_dir: str = "data/cps_metadata"
 
 
 def load_settings(env_file: str | Path = ENV_FILE) -> Settings:
@@ -59,6 +62,7 @@ def load_settings(env_file: str | Path = ENV_FILE) -> Settings:
         api_key=os.getenv("BLS_API_KEY"),
         log_level=os.getenv("BLS_LOG_LEVEL", "INFO"),
         aws_endpoint_url=os.getenv("AWS_ENDPOINT_URL"),
+        metadata_cache_dir=os.getenv("BLS_METADATA_CACHE", "data/cps_metadata"),
     )
 
 

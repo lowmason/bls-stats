@@ -23,6 +23,7 @@ committed). Only the variable *names* below are part of the contract; supply you
 | `BLS_STORE_URI` | `./data/store` | Store root. Local path for laptop use; `s3://bucket/store` for an S3-compatible object store. Deployment should use an `s3://` URI — `doctor` warns on a local path. |
 | `BLS_CONTACT_EMAIL` | warns if unset | A real contact address; BLS asks for one in the User-Agent of every request. |
 | `BLS_API_KEY` | none | Optional. Enables the [API v2 utility engine](reference/engines.md). |
+| `BLS_METADATA_CACHE` | `data/cps_metadata` | Local cache dir for CPS dimension tables. |
 | `AWS_ENDPOINT_URL` | none | S3-compatible endpoint URL (object store or local MinIO). |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | none | Standard AWS-style credentials for the object store. |
 | `BLS_S3_UNSAFE_RENAME` | `false` | Single-writer fallback for object stores without conditional PUT. Leave unset unless `bls-stats doctor` tells you to set it. |

@@ -191,3 +191,10 @@ def test_doctor_exits_zero_on_warnings_only(monkeypatch, tmp_path) -> None:  # C
     )
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0  # only warnings, no hard failures
+
+
+def test_metadata_cache_dir_from_settings(monkeypatch, tmp_path) -> None:  # C-7
+    from bls_stats.core.config import load_settings
+
+    monkeypatch.setenv("BLS_METADATA_CACHE", str(tmp_path / "meta"))
+    assert load_settings().metadata_cache_dir == str(tmp_path / "meta")
