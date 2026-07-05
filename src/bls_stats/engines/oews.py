@@ -28,10 +28,12 @@ def parse_workbook_zip(zip_path: Path, year: int, *, downloaded: datetime) -> pl
     """Extract and parse the May-data sheet from one year's OEWS workbook ZIP.
 
     Reads sheet `"All May {year} data"` via `fastexcel`/`pl.read_excel`, normalizes headers
-    (stripped, lowercased), and re-casts `area`/`occ_code` to `Utf8` — Excel round-trips these
-    code columns as numeric by default, which would silently drop leading zeros (e.g. area or
-    occupation codes) had they not already come through as strings; the explicit post-read cast
-    guarantees the contract regardless of how `fastexcel` inferred the column.
+    (stripped, lowercased), and re-casts every OEWS code column present (`area`, `occ_code`,
+    `naics`, `naics_title`, `own_code`, `i_group`, `o_group`) to `Utf8` — Excel round-trips
+    these code columns as numeric by default, which would silently drop leading zeros (e.g.
+    area, occupation, or NAICS codes) had they not already come through as strings; the
+    explicit post-read cast guarantees the contract regardless of how `fastexcel` inferred
+    the column.
 
     Args:
         zip_path: Local path to the downloaded `oesm{yy}all.zip`.
@@ -39,7 +41,8 @@ def parse_workbook_zip(zip_path: Path, year: int, *, downloaded: datetime) -> pl
         downloaded: Wall-clock ingestion timestamp; stamped onto every row as `downloaded`.
 
     Returns:
-        A `pl.DataFrame` with lowercased/stripped column names, `area` and `occ_code` as
+        A `pl.DataFrame` with lowercased/stripped column names, every present code column
+        (`area`, `occ_code`, `naics`, `naics_title`, `own_code`, `i_group`, `o_group`) as
         `Utf8`, `ref_date` (`Date`, fixed at `date(year, 5, 12)`), and `downloaded`
         (`Datetime("us")`). All other workbook columns pass through unchanged.
     """
@@ -49,8 +52,10 @@ def parse_workbook_zip(zip_path: Path, year: int, *, downloaded: datetime) -> pl
             xlsx = Path(zf.extract(member, td))
             df = pl.read_excel(xlsx, sheet_name=f"All May {year} data")
     df.columns = [c.strip().lower() for c in df.columns]
+    _CODE_COLS = ("area", "occ_code", "naics", "naics_title", "own_code", "i_group", "o_group")
+    present = [c for c in _CODE_COLS if c in df.columns]
     return df.with_columns(
-        pl.col("area", "occ_code").cast(pl.Utf8),
+        pl.col(present).cast(pl.Utf8),
         pl.lit(date(year, 5, 12)).alias("ref_date"),
         pl.lit(downloaded).dt.cast_time_unit("us").alias("downloaded"),
     )
