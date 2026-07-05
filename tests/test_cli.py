@@ -39,16 +39,17 @@ def test_backfill_qcew_malformed_range_exits_two(monkeypatch, tmp_path) -> None:
     assert result.exit_code == 2
 
 
-def test_bad_log_level_falls_back_to_info(monkeypatch, tmp_path) -> None:
+def test_bad_log_level_falls_back_to_info(monkeypatch, tmp_path) -> None:  # C-23
     import logging
 
     from bls_stats.cli import _setup
 
     monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
-    monkeypatch.setenv("BLS_LOG_LEVEL", "verbose")
+    monkeypatch.setenv("BLS_LOG_LEVEL", "verbose")  # not a real level
     logging.getLogger().handlers.clear()
-    settings, _ = _setup()  # must not raise (falls back to INFO)
-    assert settings.log_level == "verbose"
+    logging.getLogger().setLevel(logging.WARNING)  # a distinct starting level
+    _setup()
+    assert logging.getLogger().level == logging.INFO  # fell back to INFO, not left at WARNING
 
 
 def _seed_store_for_gaps(tmp_path):
