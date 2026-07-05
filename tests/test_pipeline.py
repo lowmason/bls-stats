@@ -139,6 +139,26 @@ def test_superseded_deferred_becomes_missed(store) -> None:  # ARCH §5.3 transi
     assert june.height == 3 and (june["status"] == "missed").all()
 
 
+def test_backdated_release_denied_not_fabricated(store) -> None:  # C-14
+    """Catch-up ingest must not stamp the current file as an older release's live print."""
+    older = Release("ces", date(2026, 6, 5), 2026, 5, False)
+    newer = Release("ces", date(2026, 7, 2), 2026, 6, False)
+    run_ingest(
+        Settings(), store, programs=["ces"], clock=CLOCK,
+        poll_fn=lambda client, programs: [older, newer],  # outage catch-up: two at once
+        fetch_fn=fake_fetch(), fresh_fn=lambda client, program, rd: True,
+    )
+    obs = store.scan_observations("ces").collect()
+    # the older release's date must NOT appear as a committed vintage:
+    assert obs.filter(pl.col("release_date") == date(2026, 6, 5)).height == 0
+    # the newer release committed normally:
+    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height > 0
+    # the older release's slots are recorded missed (visible to `gaps`), not silently dropped:
+    led = Ledger(store).resolved()
+    older_rows = led.filter(pl.col("release_date") == date(2026, 6, 5))
+    assert older_rows.height > 0 and (older_rows["status"] == "missed").all()
+
+
 def test_empty_slice_defers(store) -> None:
     assert _ingest(store, fetch_fn=fake_fetch(refs=[])) == 0
     assert (Ledger(store).resolved()["status"] == "deferred").all()

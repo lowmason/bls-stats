@@ -291,7 +291,46 @@ def run_ingest(
     client = build_client(settings)
     ledger = Ledger(store)
     outcomes: list[str] = []
-    for release in poll_fn(client, programs):
+    releases = list(poll_fn(client, programs))
+    newest_in_batch: dict[str, date] = {}
+    for r in releases:
+        d = newest_in_batch.get(r.program)
+        if d is None or r.release_date > d:
+            newest_in_batch[r.program] = r.release_date
+    resolved = ledger.resolved()
+
+    def _is_backdated(r) -> bool:
+        # A strictly-newer release for this program in the batch, or already ingested,
+        # means r's live-vintage window has closed — the current file no longer reflects
+        # what r published, so fetching it would fabricate a print (ARCH §2.1 / C-14).
+        if r.release_date < newest_in_batch[r.program]:
+            return True
+        ingested = resolved.filter(
+            (pl.col("program") == r.program) & (pl.col("status") == "ingested")
+        )
+        latest = ingested["release_date"].max()
+        return latest is not None and r.release_date < latest
+
+    for release in releases:
+        if _is_backdated(release):
+            missed_slots = expand(
+                release,
+                lambda rd, program=release.program, before=release.release_date: (
+                    ledger.prior_benchmark_count(program, rd, before_release=before)
+                ),
+            )
+            if not dry_run:
+                ledger.record([
+                    SlotRecord(release.program, s.ref_date, release.release_date,
+                               s.revision, s.benchmark, "increment", 0, "missed", clock())
+                    for s in missed_slots
+                ])
+            log.warning(
+                "%s release %s is back-dated (a newer release exists) — recorded missed, "
+                "not fetched; use `backfill` for history (C-14)",
+                release.program, release.release_date,
+            )
+            continue
         slots = [
             s
             for s in expand(
@@ -308,16 +347,8 @@ def run_ingest(
         if not slots:
             continue
         outcome = _process_event(
-            release,
-            slots,
-            settings,
-            store,
-            ledger,
-            client,
-            dry_run=dry_run,
-            now=clock(),
-            fetch_fn=fetch_fn,
-            fresh_fn=fresh_fn,
+            release, slots, settings, store, ledger, client,
+            dry_run=dry_run, now=clock(), fetch_fn=fetch_fn, fresh_fn=fresh_fn,
         )
         if outcome == "ok":
             _expire_superseded(ledger, release.program, release.release_date, clock(), dry_run)
