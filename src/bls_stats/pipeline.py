@@ -150,7 +150,7 @@ def _fetch_event(
         for year in sorted({r.year for r in refs}):
             quarters = sorted({(r.month + 2) // 3 for r in refs if r.year == year})
             frames.append(fetch_year(client, year, quarters, dest_dir, downloaded))
-        return pl.concat(frames, how="vertical_relaxed")
+        return pl.concat(frames, how="diagonal_relaxed")
     if program == "oews":
         from bls_stats.engines.oews import fetch_year as fetch_oews
 
@@ -158,7 +158,7 @@ def _fetch_event(
             fetch_oews(client, year, dest_dir, downloaded)
             for year in sorted({r.year for r in refs})
         ]
-        return pl.concat(frames, how="vertical_relaxed")
+        return pl.concat(frames, how="diagonal_relaxed")
     if program == "ep":  # scrape-date vintages need a storage schema decision (ARCH §12)
         raise ValidationError("ep fetch is not wired to the vintage store")
     from bls_stats.engines.labstat import fetch

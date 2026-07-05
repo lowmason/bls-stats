@@ -51,7 +51,8 @@ def load_settings(env_file: str | Path = ENV_FILE) -> Settings:
 
     Returns:
         A `Settings` populated from `BLS_STORE_URI`, `BLS_CONTACT_EMAIL`, `BLS_API_KEY`,
-        `BLS_LOG_LEVEL`, and `AWS_ENDPOINT_URL`, falling back to documented defaults.
+        `BLS_LOG_LEVEL`, `AWS_ENDPOINT_URL`, and `BLS_METADATA_CACHE`, falling back to
+        documented defaults.
     """
     load_dotenv(env_file)  # silently a no-op when the file is absent
     email = os.getenv("BLS_CONTACT_EMAIL")

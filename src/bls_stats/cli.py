@@ -202,6 +202,8 @@ def gaps(
     from bls_stats.vintage.ledger import Ledger
 
     _, store = _setup()
+    if program:
+        _require_program(program)
     cal = store.read_state("release_calendar")
     if cal is None:
         typer.echo("no calendar — run `bls-stats calendar build`", err=True)
@@ -315,8 +317,9 @@ def store_query(
 def metadata_fetch(refresh: bool = typer.Option(False)) -> None:
     """Download and cache the CPS dimension tables (series catalog + `ln.*` mappings).
 
-    Cached under `data/cps_metadata` with an integrity manifest; `--refresh` forces a
-    re-download even if the cache looks valid. Always exits `0`.
+    Cached under `settings.metadata_cache_dir` (env `BLS_METADATA_CACHE`, default
+    `data/cps_metadata`) with an integrity manifest; `--refresh` forces a re-download
+    even if the cache looks valid. Always exits `0`.
     """
     from pathlib import Path
 

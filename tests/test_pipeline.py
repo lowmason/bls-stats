@@ -347,6 +347,30 @@ def test_oews_multiyear_backfill_fetches_all_years(store, monkeypatch) -> None: 
     assert sorted(df["ref_date"].dt.year().unique().to_list()) == [2020, 2021, 2022]
 
 
+def test_oews_multiyear_backfill_tolerates_column_drift(monkeypatch) -> None:  # C-3 review
+    import bls_stats.engines.oews as oews_engine
+    from bls_stats.pipeline import _fetch_event
+    from bls_stats.releases.profiles import Slot
+
+    def fake_oews(client, year, dest_dir, downloaded):
+        cols = {
+            "area": ["0000000"],
+            "occ_code": ["00-0000"],
+            "value": [1.0],
+            "ref_date": [date(year, 5, 12)],
+            "downloaded": [downloaded],
+        }
+        if year == 2021:
+            cols["naics"] = ["000000"]  # 2021 has an extra code column 2020 lacks -> column drift
+        return pl.DataFrame(cols)
+
+    monkeypatch.setattr(oews_engine, "fetch_year", fake_oews)
+    slots = [Slot(date(y, 5, 12), None, None, "backfill") for y in (2020, 2021)]
+    df = _fetch_event(None, "oews", slots, __import__("pathlib").Path("/tmp"), NOW)
+    assert sorted(df["ref_date"].dt.year().unique().to_list()) == [2020, 2021]
+    assert "naics" in df.columns  # union schema; the 2020 row has a null naics
+
+
 def _backfill_cal(store):
     """A minimal release_calendar so filter_published passes for jolts."""
     from bls_stats.releases.calendar import CALENDAR_SCHEMA

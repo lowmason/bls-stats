@@ -80,7 +80,7 @@ def test_parse_feed_skips_impossible_embedded_date() -> None:  # C-2
     assert [r.release_date.isoformat() for r in out] == ["2026-07-03"]  # bad skipped, good kept
 
 
-def test_poll_tolerates_non_xml_body(monkeypatch) -> None:  # C-2
+def test_poll_tolerates_non_xml_body() -> None:  # C-2
     import httpx
 
     def handler(request: httpx.Request) -> httpx.Response:

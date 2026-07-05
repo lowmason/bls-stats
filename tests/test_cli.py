@@ -115,6 +115,45 @@ def test_gaps_program_scopes_strict_missed(monkeypatch, tmp_path) -> None:  # C-
     assert "acknowledged: 1" in result.output
 
 
+def test_gaps_unknown_program_exits_two(monkeypatch, tmp_path) -> None:  # C-1 (whole-branch review)
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(app, ["gaps", "--program", "CES"])  # uppercase typo
+    assert result.exit_code == 2
+    assert "unknown program" in result.output
+
+
+def test_gaps_acknowledged_is_program_scoped(monkeypatch, tmp_path) -> None:  # [T9] C-22
+    from datetime import UTC, date, datetime
+
+    from bls_stats.storage.delta import VintageStore
+    from bls_stats.vintage.ledger import Ledger, SlotRecord
+
+    _seed_store_for_gaps(tmp_path)  # already seeds a jolts missed slot
+    # Seed a SECOND program's missed slot locally (do not touch the shared helper): if the
+    # ledger were scoped only by the calendar (not by --program), `gaps --program jolts`
+    # would count both missed slots and report `acknowledged: 2`.
+    store = VintageStore(str(tmp_path / "store"))
+    Ledger(store).record(
+        [
+            SlotRecord(
+                "ces",
+                date(2026, 3, 12),
+                date(2026, 4, 3),
+                0,
+                0,
+                "increment",
+                0,
+                "missed",
+                datetime(2026, 4, 3, tzinfo=UTC),
+            ),
+        ]
+    )
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(app, ["gaps", "--program", "jolts", "--strict"])
+    assert result.exit_code == 1  # jolts' own missed slot fails under --strict
+    assert "acknowledged: 1" in result.output  # only jolts', not the leaked ces slot
+
+
 def test_gaps_bad_as_of_date_exits_two(monkeypatch, tmp_path) -> None:  # C-8 (gaps --as-of-date)
     _seed_store_for_gaps(tmp_path)
     monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
