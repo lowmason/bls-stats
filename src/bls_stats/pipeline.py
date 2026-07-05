@@ -415,11 +415,10 @@ def _process_event(
 
     try:
         spec = REGISTRY[program]
-        if (
-            spec.increment_url
-            and spec.increment_url.startswith("https://download.bls.gov")
-            and not fresh_fn(client, program, release.release_date)
-        ):
+        # QCEW/OEWS/EP are freshness_checked=False: their sources don't serve a LABSTAT-style
+        # Last-Modified the flat-file probe understands. QCEW's newest quarter is still guarded
+        # by the year_to_date empty-slice deferral; a QCEW-native freshness probe is future work.
+        if spec.freshness_checked and not fresh_fn(client, program, release.release_date):
             log.warning("%s: file not yet fresh — deferring %d slot(s)", label, len(slots))
             for slot in slots:
                 _record("deferred", slot)

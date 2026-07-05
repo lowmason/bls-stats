@@ -96,6 +96,9 @@ class ProgramSpec:
         row_band: Sanity-check tolerance (ARCH §7.3): a fetched frame's row count must fall
             within this fraction of its comparator's row count.
         null_rate_max: Sanity-check ceiling (ARCH §7.3) on the `value` column's null rate.
+        freshness_checked: Whether the ARCH §5.3 stale-file gate applies to this program's
+            LABSTAT bulk file (`True` for ces/sae/jolts/cps/bed); `False` for qcew/oews/ep,
+            whose sources don't serve a LABSTAT-style `Last-Modified` the probe understands.
     """
 
     name: str
@@ -113,6 +116,7 @@ class ProgramSpec:
     profile: RevisionProfile
     row_band: float = 0.20  # ARCH §7.3 sanity band
     null_rate_max: float = 0.05
+    freshness_checked: bool = False  # ARCH §5.3 stale-file gate applies (LABSTAT bulk files)
 
 
 # Fixed-width series-ID layouts (BEH §2.1 table; verify against <prefix>.series docs).
@@ -180,6 +184,7 @@ REGISTRY: dict[str, ProgramSpec] = {
         schedule_url="https://www.bls.gov/schedule/news_release/empsit.htm",
         release_time_et="08:30",
         profile=RevisionProfile(3, "fixed", "jan_data", 5),
+        freshness_checked=True,
     ),
     "sae": ProgramSpec(
         name="sae",
@@ -195,6 +200,7 @@ REGISTRY: dict[str, ProgramSpec] = {
         schedule_url="https://www.bls.gov/schedule/news_release/laus.htm",
         release_time_et="10:00",
         profile=RevisionProfile(2, "fixed", "jan_data", 5),
+        freshness_checked=True,
     ),
     "jolts": ProgramSpec(
         name="jolts",
@@ -210,6 +216,7 @@ REGISTRY: dict[str, ProgramSpec] = {
         schedule_url="https://www.bls.gov/schedule/news_release/jolts.htm",
         release_time_et="10:00",
         profile=RevisionProfile(2, "fixed", "jan_data", 5),
+        freshness_checked=True,
     ),
     "cps": ProgramSpec(
         name="cps",
@@ -225,6 +232,7 @@ REGISTRY: dict[str, ProgramSpec] = {
         schedule_url="https://www.bls.gov/schedule/news_release/empsit.htm",
         release_time_et="08:30",
         profile=RevisionProfile(1, "fixed", "jan_data", 5),
+        freshness_checked=True,
     ),
     "bed": ProgramSpec(
         name="bed",
@@ -240,6 +248,7 @@ REGISTRY: dict[str, ProgramSpec] = {
         schedule_url="https://www.bls.gov/schedule/news_release/cewbd.htm",
         release_time_et="10:00",
         profile=RevisionProfile(1, "fixed", "q1_data", 2),
+        freshness_checked=True,
     ),
     "qcew": ProgramSpec(
         name="qcew",

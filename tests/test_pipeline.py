@@ -159,6 +159,26 @@ def test_backdated_release_denied_not_fabricated(store) -> None:  # C-14
     assert older_rows.height > 0 and (older_rows["status"] == "missed").all()
 
 
+def test_freshness_gate_consulted_per_registry_flag(store) -> None:  # C-15
+    calls = {"ces": 0, "qcew": 0}
+
+    def fresh(client, program, rd):
+        calls[program] = calls.get(program, 0) + 1
+        return True
+
+    run_ingest(
+        Settings(), store, programs=["ces"], clock=CLOCK,
+        poll_fn=lambda client, programs: [JUNE_RELEASE],
+        fetch_fn=fake_fetch(), fresh_fn=fresh,
+    )
+    assert calls["ces"] == 1  # LABSTAT program: freshness checked
+
+    from bls_stats.registry import REGISTRY
+    assert REGISTRY["ces"].freshness_checked is True
+    assert REGISTRY["qcew"].freshness_checked is False
+    assert REGISTRY["oews"].freshness_checked is False
+
+
 def test_backdated_repoll_does_not_downgrade_ingested(store) -> None:  # C-14 fix (Important #1)
     """A back-dated re-poll must not flip an already-ingested slot to missed (ARCH §5.3)."""
     june = Release("ces", date(2026, 7, 2), 2026, 6, False)   # June data, published Jul 2
