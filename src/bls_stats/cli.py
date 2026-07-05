@@ -212,7 +212,7 @@ def gaps(
         ledger = ledger.filter(pl.col("program") == program)
     published = cal.filter(pl.col("release_date").is_not_null())
     ref = (
-        date.fromisoformat(as_of_date)
+        _parse_date(as_of_date, "--as-of-date")
         if as_of_date
         else (published["release_date"].max() if published.height else None)
     )

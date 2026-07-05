@@ -114,6 +114,14 @@ def test_gaps_program_scopes_strict_missed(monkeypatch, tmp_path) -> None:  # C-
     assert "acknowledged: 1" in result.output
 
 
+def test_gaps_bad_as_of_date_exits_two(monkeypatch, tmp_path) -> None:  # C-8 (gaps --as-of-date)
+    _seed_store_for_gaps(tmp_path)
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(app, ["gaps", "--program", "ces", "--as-of-date", "2026-3-12"])
+    assert result.exit_code == 2
+    assert "invalid date" in result.output
+
+
 def test_ingest_unknown_program_exits_two(monkeypatch, tmp_path) -> None:  # C-4
     monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
     result = runner.invoke(app, ["ingest", "--program", "CES"])  # uppercase typo
