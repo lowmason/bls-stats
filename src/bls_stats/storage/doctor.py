@@ -137,8 +137,10 @@ def check_conditional_put(settings: Settings) -> CheckResult:
     import boto3
     from botocore.exceptions import ClientError
 
-    bucket = settings.store_uri.removeprefix("s3://").split("/", 1)[0]
-    key = f"_doctor/probe-{uuid.uuid4().hex}"
+    without_scheme = settings.store_uri.removeprefix("s3://")
+    bucket, _, prefix = without_scheme.partition("/")
+    prefix = prefix.rstrip("/")
+    key = f"{prefix + '/' if prefix else ''}_doctor/probe-{uuid.uuid4().hex}"
     s3 = boto3.client("s3", endpoint_url=settings.aws_endpoint_url)
     try:
         s3.put_object(Bucket=bucket, Key=key, Body=b"a", IfNoneMatch="*")
