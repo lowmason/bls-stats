@@ -1,5 +1,7 @@
 # bls-stats Implementation Plan
 
+> **STATUS: COMPLETE** (2026-07-04) — all 22 tasks implemented and reviewed on branch `impl-plan-1` (commits `e5e96f4..63d58c9`); final whole-branch review clean after one consolidated fix wave. Deferred minors and post-plan items: `.sdd/progress.md` and ARCH §12.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the `bls-stats` package: vintage-aware download of eight BLS data products with two-stage ingest (bulk backfill + daily feed-driven increments) into a Delta Lake store on S3-compatible storage.
@@ -299,7 +301,7 @@ Expected: 5 passed.
 - Produces (consumed by *every* later task):
   - `Frequency` (StrEnum: `MONTHLY|QUARTERLY|ANNUAL|NONE`), `RefDateRule` (StrEnum: `DAY_12|LAST_BUSINESS_DAY|QUARTER_END_12|MAY_12|NONE`)
   - `RevisionProfile(routine_slots: int, routine_rule: str, benchmark_rule: str | None, benchmark_window_years: int | None)` — `routine_rule` ∈ {`"fixed"`, `"year_to_date"`}; `benchmark_rule` ∈ {`"jan_data"`, `"q1_data"`, None}
-  - `ProgramSpec(name, frequency, ref_date_rule, series_prefix, series_layout, unit_columns, backfill_url, increment_url, benchmark_url, feed_url, archive_url, schedule_url, release_time_et, profile, row_band, null_rate_max)`
+  - `ProgramSpec(name, frequency, ref_date_rule, series_prefix, unit_columns, backfill_url, increment_url, benchmark_url, feed_url, archive_url, schedule_url, release_time_et, profile, row_band, null_rate_max)` — series-ID layouts live in the separate `SERIES_LAYOUTS` dict (prefix-keyed), not on the spec
   - `REGISTRY: dict[str, ProgramSpec]` with keys `ces sae jolts cps bed qcew oews ep`
   - `SERIES_LAYOUTS: dict[str, tuple[tuple[str, int], ...]]` keyed by 2-char prefix (`CE SM BD JT LN OE EP`)
 
@@ -1191,7 +1193,8 @@ def test_minio_roundtrip() -> None:
     from bls_stats.core.config import Settings, storage_options as so
 
     store = VintageStore(
-        "s3://bls-stats/test-store", so(Settings(aws_endpoint_url=endpoint))
+        "s3://bls-stats/test-store",
+        so(Settings(store_uri="s3://bls-stats/test-store", aws_endpoint_url=endpoint)),
     )
     store.append_observations("ces", obs_frame(date(2026, 6, 12), date(2026, 7, 2), 0, 0))
     assert store.slot_exists("ces", date(2026, 6, 12), date(2026, 7, 2), 0, 0)
@@ -1251,18 +1254,18 @@ VINTAGES = frame([
 
 def test_latest_picks_max_release_date() -> None:
     out = latest(VINTAGES, ["series_id"]).collect()
-    assert out.height == 1 and out["v"][0] == 3.0
+    assert out.height == 1 and out["value"][0] == 3.0
 
 
 def test_as_of_never_leaks_future() -> None:  # the ARCH §9 crown-jewel invariant
     out = as_of(VINTAGES, ["series_id"], date(2026, 6, 15)).collect()
-    assert out["v"][0] == 2.0
+    assert out["value"][0] == 2.0
     assert (out["release_date"] <= date(2026, 6, 15)).all()
 
 
 def test_as_of_inclusive_of_release_day() -> None:
     out = as_of(VINTAGES, ["series_id"], date(2026, 6, 1)).collect()
-    assert out["v"][0] == 2.0
+    assert out["value"][0] == 2.0
 
 
 def test_tiebreak_prefers_increment_then_counters() -> None:  # ARCH §4.4
@@ -1272,12 +1275,12 @@ def test_tiebreak_prefers_increment_then_counters() -> None:  # ARCH §4.4
         {"ref": date(2026, 4, 12), "rel": date(2026, 7, 1), "rev": 2, "bm": 1, "v": 20.0},
     ])
     out = latest(lf, ["series_id"]).collect()
-    assert out.height == 1 and out["v"][0] == 20.0
+    assert out.height == 1 and out["value"][0] == 20.0
 
 
 def test_prints_filters_on_counters() -> None:
     out = prints(VINTAGES, revision=1).collect()
-    assert out.height == 1 and out["v"][0] == 2.0
+    assert out.height == 1 and out["value"][0] == 2.0
 ```
 
 - [ ] **Step 2: Run to verify failure** — `uv run pytest tests/storage/test_reads.py -v`
@@ -2602,12 +2605,12 @@ def parse_flat_file(
     period_re = r"^M(0[1-9]|1[0-2])$" if spec.frequency == Frequency.MONTHLY else r"^Q0[1-4]$"
     lf = (
         pl.scan_csv(
-            path, separator="\t",
-            schema_overrides={"series_id": pl.Utf8, "year": pl.Int32,
-                              "period": pl.Utf8, "value": pl.Utf8, "footnote_codes": pl.Utf8},
+            path, separator="\t", infer_schema=False,
             missing_utf8_is_empty_string=True,
         )
+        .rename(lambda c: c.strip())  # LABSTAT headers are space-padded
         .with_columns(pl.col("series_id", "period", "value", "footnote_codes").str.strip_chars())
+        .with_columns(pl.col("year").str.strip_chars().cast(pl.Int32))
         .filter(pl.col("period").str.contains(period_re))  # drops M13 (BEH §2.1)
         .with_columns(
             pl.col("period").str.slice(1).cast(pl.Int8).alias("_pnum"),
@@ -3499,8 +3502,15 @@ def enrich(obs: pl.DataFrame, meta: dict[str, pl.DataFrame]) -> pl.DataFrame:
         if code_col in out.columns:
             out = out.join(mapping, on=code_col, how="left")
     if "footnote" in meta and "footnote_codes" in out.columns:
-        out = out.join(
-            meta["footnote"], left_on="footnote_codes", right_on="footnote_code", how="left"
+        lookup = dict(meta["footnote"].select("footnote_code", "footnote_text").iter_rows())
+        out = out.with_columns(
+            pl.col("footnote_codes")
+            .str.split(",")
+            .list.eval(pl.element().str.strip_chars().replace_strict(lookup, default=None))
+            .list.drop_nulls()
+            .list.join("; ")
+            .replace("", None)
+            .alias("footnote_text")
         )
     assert out.height == before, "enrichment must never drop observations (BEH §2.5)"
     return out
@@ -3548,13 +3558,15 @@ import polars as pl
 import pytest
 
 from bls_stats.core.config import Settings
-from bls_stats.pipeline import run_ingest, stamp
+from bls_stats.pipeline import run_backfill, run_ingest, stamp
 from bls_stats.releases.feeds import Release
 from bls_stats.storage.delta import VintageStore
 from bls_stats.vintage.ledger import Ledger
 
 NOW = datetime(2026, 7, 2, 13, 0, tzinfo=timezone.utc)
 CLOCK = lambda: NOW  # noqa: E731
+LATER = datetime(2026, 8, 7, 13, 0, tzinfo=timezone.utc)
+LATER_CLOCK = lambda: LATER  # noqa: E731
 JUNE_RELEASE = Release("ces", date(2026, 7, 2), 2026, 6, False)
 
 
@@ -3629,14 +3641,14 @@ def test_stale_file_defers_and_exits_zero(store) -> None:
 
 def test_deferred_event_retried_next_run(store) -> None:
     _ingest(store, fresh_fn=lambda client, program, rd: False)
-    assert _ingest(store) == 0  # file now fresh
+    assert _ingest(store, clock=LATER_CLOCK) == 0  # file now fresh (later run)
     assert (Ledger(store).resolved()["status"] == "ingested").all()
 
 
 def test_superseded_deferred_becomes_missed(store) -> None:  # ARCH §5.3 transition
     _ingest(store, fresh_fn=lambda client, program, rd: False)  # June deferred
     july = Release("ces", date(2026, 8, 7), 2026, 7, False)
-    _ingest(store, poll_fn=lambda client, programs: [july])     # newer release ingests
+    _ingest(store, clock=LATER_CLOCK, poll_fn=lambda client, programs: [july])  # newer release ingests (later run)
     led = Ledger(store).resolved()
     june = led.filter(pl.col("release_date") == date(2026, 7, 2))
     assert june.height == 3 and (june["status"] == "missed").all()
@@ -3667,6 +3679,30 @@ def test_stamp_types() -> None:
         date(2026, 6, 12), date(2026, 7, 2), 0, 0, "increment", NOW,
     )
     assert df.schema["revision"] == pl.Int16 and df.schema["source"] == pl.Utf8
+
+
+def _seed_calendar(store) -> None:
+    store.append_state("release_calendar", pl.DataFrame({
+        "program": ["ces"],
+        "ref_date": [date(2026, 6, 12)],
+        "release_date": [date(2026, 7, 2)],
+        "original_release": pl.Series([None], dtype=pl.Date),
+        "is_benchmark": [False],
+    }))
+
+
+def test_backfill_without_calendar_exits_two(store) -> None:
+    assert run_backfill(Settings(), store, "ces", "2020/01", "2020/12", clock=CLOCK) == 2
+
+
+def test_backfill_program_missing_from_calendar_exits_two(store) -> None:
+    _seed_calendar(store)
+    assert run_backfill(Settings(), store, "jolts", "2020/01", "2020/12", clock=CLOCK) == 2
+
+
+def test_backfill_malformed_range_exits_two(store) -> None:
+    _seed_calendar(store)
+    assert run_backfill(Settings(), store, "ces", "2020-01", "2020-12", clock=CLOCK) == 2
 ```
 
 - [ ] **Step 2: Run to verify failure** — `uv run pytest tests/test_pipeline.py -v`
@@ -3838,13 +3874,14 @@ def run_ingest(
     failed = outcomes.count("failed")
     if failed and failed == len(outcomes):
         return 2
-    return 1 if failed else 0
+    return 1 if failed or "partial" in outcomes else 0
 
 
 def _process_event(release, slots, settings, store, ledger, client, *,
                    dry_run: bool, now: datetime, fetch_fn, fresh_fn) -> str:
     program = release.program
     label = f"{program} release {release.release_date}"
+    appended = 0
 
     def _record(status: str, slot: Slot, row_count: int = 0) -> None:
         if not dry_run:
@@ -3878,13 +3915,14 @@ def _process_event(release, slots, settings, store, ledger, client, *,
                 log.warning("%s: slot %s already committed — repairing ledger only", label, slot)
             elif not dry_run:
                 store.append_observations(program, stamped)
+                appended += 1
             _record("ingested", slot, stamped.height)
             committed += 1
         log.info("%s: %d/%d slots committed", label, committed, len(slots))
         return "ok" if committed else "deferred"
     except Exception:
         log.exception("%s: event failed", label)
-        return "failed"
+        return "partial" if appended else "failed"  # data committed => partial (ARCH §7.4)
 
 
 def run_backfill(
@@ -3898,7 +3936,11 @@ def run_backfill(
     if cal is None:
         log.error("release calendar missing — run `bls-stats calendar build` first (ARCH §8)")
         return 2
-    periods = filter_published(program, reference_periods(program, start, end), cal)
+    try:
+        periods = filter_published(program, reference_periods(program, start, end), cal)
+    except ValueError as exc:  # PeriodError subclasses ValueError; also empty program calendar
+        log.error("%s: %s", program, exc)
+        return 2
     if not periods:
         log.warning("%s: no published periods in range", program)
         return 0
@@ -3986,6 +4028,26 @@ def test_ingest_exit_code_propagates(monkeypatch, tmp_path) -> None:
 def test_backfill_requires_program_and_range() -> None:
     result = runner.invoke(app, ["backfill"])
     assert result.exit_code != 0
+
+
+def test_backfill_qcew_malformed_range_exits_two(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(
+        app, ["backfill", "--program", "qcew", "--start", "2020-13", "--end", "2020/1"]
+    )
+    assert result.exit_code == 2
+
+
+def test_bad_log_level_falls_back_to_info(monkeypatch, tmp_path) -> None:
+    import logging
+
+    from bls_stats.cli import _setup
+
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    monkeypatch.setenv("BLS_LOG_LEVEL", "verbose")
+    logging.getLogger().handlers.clear()
+    settings, _ = _setup()  # must not raise (falls back to INFO)
+    assert settings.log_level == "verbose"
 ```
 
 - [ ] **Step 2: Run to verify failure** — `uv run pytest tests/test_cli.py -v`
@@ -4018,8 +4080,12 @@ PROGRAMS = ["ces", "sae", "jolts", "cps", "bed", "qcew", "oews", "ep"]
 
 def _setup() -> tuple:
     settings = load_settings()
+    level = logging.getLevelNamesMapping().get(settings.log_level.upper())
+    if level is None:
+        typer.echo(f"unknown BLS_LOG_LEVEL {settings.log_level!r} — using INFO", err=True)
+        level = logging.INFO
     logging.basicConfig(
-        stream=sys.stderr, level=settings.log_level,
+        stream=sys.stderr, level=level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     from bls_stats.storage.delta import VintageStore
@@ -4053,7 +4119,11 @@ def backfill(
 
     settings, store = _setup()
     if program == "qcew":
-        years = sorted({y for y, _ in reference_periods("qcew", start, end)})
+        try:
+            years = sorted({y for y, _ in reference_periods("qcew", start, end)})
+        except ValueError as exc:  # PeriodError subclasses ValueError
+            typer.echo(f"qcew: {exc}", err=True)
+            raise typer.Exit(2) from None
         codes = [
             pipeline.run_backfill(settings, store, "qcew", f"{y}/1", f"{y}/4", dry_run=dry_run)
             for y in years
