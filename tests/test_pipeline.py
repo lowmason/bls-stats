@@ -144,9 +144,13 @@ def test_backdated_release_denied_not_fabricated(store) -> None:  # C-14
     older = Release("ces", date(2026, 6, 5), 2026, 5, False)
     newer = Release("ces", date(2026, 7, 2), 2026, 6, False)
     run_ingest(
-        Settings(), store, programs=["ces"], clock=CLOCK,
+        Settings(),
+        store,
+        programs=["ces"],
+        clock=CLOCK,
         poll_fn=lambda client, programs: [older, newer],  # outage catch-up: two at once
-        fetch_fn=fake_fetch(), fresh_fn=lambda client, program, rd: True,
+        fetch_fn=fake_fetch(),
+        fresh_fn=lambda client, program, rd: True,
     )
     obs = store.scan_observations("ces").collect()
     # the older release's date must NOT appear as a committed vintage:
@@ -167,13 +171,18 @@ def test_freshness_gate_consulted_per_registry_flag(store) -> None:  # C-15
         return True
 
     run_ingest(
-        Settings(), store, programs=["ces"], clock=CLOCK,
+        Settings(),
+        store,
+        programs=["ces"],
+        clock=CLOCK,
         poll_fn=lambda client, programs: [JUNE_RELEASE],
-        fetch_fn=fake_fetch(), fresh_fn=fresh,
+        fetch_fn=fake_fetch(),
+        fresh_fn=fresh,
     )
     assert calls["ces"] == 1  # LABSTAT program: freshness checked
 
     from bls_stats.registry import REGISTRY
+
     assert REGISTRY["ces"].freshness_checked is True
     assert REGISTRY["qcew"].freshness_checked is False
     assert REGISTRY["oews"].freshness_checked is False
@@ -181,8 +190,8 @@ def test_freshness_gate_consulted_per_registry_flag(store) -> None:  # C-15
 
 def test_backdated_repoll_does_not_downgrade_ingested(store) -> None:  # C-14 fix (Important #1)
     """A back-dated re-poll must not flip an already-ingested slot to missed (ARCH §5.3)."""
-    june = Release("ces", date(2026, 7, 2), 2026, 6, False)   # June data, published Jul 2
-    july = Release("ces", date(2026, 8, 6), 2026, 7, False)   # July data, published Aug 6 (newer)
+    june = Release("ces", date(2026, 7, 2), 2026, 6, False)  # June data, published Jul 2
+    july = Release("ces", date(2026, 8, 6), 2026, 7, False)  # July data, published Aug 6 (newer)
     _ingest(store, poll_fn=lambda client, programs: [june], clock=CLOCK)  # run 1: June ingests
     # run 2: rolling feed rolls forward, June re-appears alongside newer July
     _ingest(store, poll_fn=lambda client, programs: [june, july], clock=LATER_CLOCK)
@@ -190,8 +199,8 @@ def test_backdated_repoll_does_not_downgrade_ingested(store) -> None:  # C-14 fi
     june_rows = led.filter(pl.col("release_date") == date(2026, 7, 2))
     assert june_rows.height > 0 and (june_rows["status"] == "ingested").all()  # NOT downgraded
     obs = store.scan_observations("ces").collect()
-    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height > 0     # June obs intact
-    assert obs.filter(pl.col("release_date") == date(2026, 8, 6)).height > 0     # July committed
+    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height > 0  # June obs intact
+    assert obs.filter(pl.col("release_date") == date(2026, 8, 6)).height > 0  # July committed
 
 
 def test_backdated_via_ledger_branch_recorded_missed(store) -> None:  # C-14 coverage (Important #2)
@@ -205,7 +214,7 @@ def test_backdated_via_ledger_branch_recorded_missed(store) -> None:  # C-14 cov
     assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height == 0  # June not fabricated
     led = Ledger(store).resolved()
     june_rows = led.filter(pl.col("release_date") == date(2026, 7, 2))
-    assert june_rows.height > 0 and (june_rows["status"] == "missed").all()      # recorded missed
+    assert june_rows.height > 0 and (june_rows["status"] == "missed").all()  # recorded missed
     assert (led.filter(pl.col("release_date") == date(2026, 8, 6))["status"] == "ingested").all()
 
 
@@ -289,9 +298,20 @@ def test_comparator_falls_back_to_latest_ingested(store) -> None:  # C-16
     from bls_stats.vintage.ledger import Ledger, SlotRecord
 
     ledger = Ledger(store)
-    ledger.record([
-        SlotRecord("ces", date(2026, 5, 12), date(2026, 6, 1), None, None,
-                   "backfill", 500, "ingested", NOW),
-    ])
+    ledger.record(
+        [
+            SlotRecord(
+                "ces",
+                date(2026, 5, 12),
+                date(2026, 6, 1),
+                None,
+                None,
+                "backfill",
+                500,
+                "ingested",
+                NOW,
+            ),
+        ]
+    )
     # revision=0 increment has no same-revision comparator, but a backfill baseline exists:
     assert _comparator(ledger, "ces", 0) == 500

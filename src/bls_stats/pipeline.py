@@ -335,15 +335,28 @@ def run_ingest(
                 not in ("ingested", "missed")
             ]
             if missed_slots and not dry_run:
-                ledger.record([
-                    SlotRecord(release.program, s.ref_date, release.release_date,
-                               s.revision, s.benchmark, "increment", 0, "missed", clock())
-                    for s in missed_slots
-                ])
+                ledger.record(
+                    [
+                        SlotRecord(
+                            release.program,
+                            s.ref_date,
+                            release.release_date,
+                            s.revision,
+                            s.benchmark,
+                            "increment",
+                            0,
+                            "missed",
+                            clock(),
+                        )
+                        for s in missed_slots
+                    ]
+                )
             log.warning(
                 "%s release %s is back-dated (a newer release exists) — not fetched; "
                 "recorded %d new slot(s) missed, use `backfill` for history (C-14)",
-                release.program, release.release_date, len(missed_slots),
+                release.program,
+                release.release_date,
+                len(missed_slots),
             )
             continue
         slots = [
@@ -362,8 +375,16 @@ def run_ingest(
         if not slots:
             continue
         outcome = _process_event(
-            release, slots, settings, store, ledger, client,
-            dry_run=dry_run, now=clock(), fetch_fn=fetch_fn, fresh_fn=fresh_fn,
+            release,
+            slots,
+            settings,
+            store,
+            ledger,
+            client,
+            dry_run=dry_run,
+            now=clock(),
+            fetch_fn=fetch_fn,
+            fresh_fn=fresh_fn,
         )
         if outcome == "ok":
             _expire_superseded(ledger, release.program, release.release_date, clock(), dry_run)
