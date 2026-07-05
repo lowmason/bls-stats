@@ -128,6 +128,47 @@ def test_programs_matches_registry() -> None:  # C-9
     assert PROGRAMS == list(REGISTRY)
 
 
+def test_store_query_bad_ref_date_exits_two(monkeypatch, tmp_path) -> None:  # C-8
+    from datetime import UTC, date, datetime
+
+    import polars as pl
+
+    from bls_stats.storage.delta import VintageStore
+
+    store = VintageStore(str(tmp_path / "store"))
+    store.append_observations(
+        "ces",
+        pl.DataFrame(
+            {
+                "series_id": ["CES0000000001"],
+                "value": [1.0],
+                "footnote_codes": [""],
+                "ref_date": [date(2026, 3, 12)],
+                "release_date": [date(2026, 4, 3)],
+                "revision": [0],
+                "benchmark": [0],
+                "source": ["increment"],
+                "downloaded": [datetime(2026, 4, 3, tzinfo=UTC)],
+            },
+            schema={
+                "series_id": pl.Utf8,
+                "value": pl.Float64,
+                "footnote_codes": pl.Utf8,
+                "ref_date": pl.Date,
+                "release_date": pl.Date,
+                "revision": pl.Int16,
+                "benchmark": pl.Int16,
+                "source": pl.Utf8,
+                "downloaded": pl.Datetime("us", "UTC"),
+            },
+        ),
+    )
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(app, ["store", "query", "--program", "ces", "--ref-date", "2026-3-12"])
+    assert result.exit_code == 2
+    assert "invalid date" in result.output
+
+
 def test_doctor_exits_zero_on_warnings_only(monkeypatch, tmp_path) -> None:  # C-6
     from bls_stats.storage.doctor import CheckResult
 

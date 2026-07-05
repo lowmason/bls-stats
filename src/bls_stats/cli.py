@@ -33,6 +33,14 @@ def _require_program(program: str) -> None:
         raise typer.Exit(2)
 
 
+def _parse_date(value: str, label: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        typer.echo(f"{label}: invalid date {value!r} (expected YYYY-MM-DD)", err=True)
+        raise typer.Exit(2) from None
+
+
 def _setup() -> tuple:
     settings = load_settings()
     level = logging.getLevelNamesMapping().get(settings.log_level.upper())
@@ -292,12 +300,12 @@ def store_query(
     if lf is None:
         typer.echo(f"{program}: (empty)", err=True)
         raise typer.Exit(1)
-    lf = lf.filter(pl.col("ref_date") == date.fromisoformat(ref_date))
+    lf = lf.filter(pl.col("ref_date") == _parse_date(ref_date, "--ref-date"))
     units = list(REGISTRY[program].unit_columns)
     if all_vintages:
         out = lf.sort("release_date").collect()
     elif as_of:
-        out = as_of_read(lf, units, date.fromisoformat(as_of)).collect()
+        out = as_of_read(lf, units, _parse_date(as_of, "--as-of")).collect()
     else:
         out = latest(lf, units).collect()
     typer.echo(str(out))
@@ -360,7 +368,7 @@ def metadata_enrich(ref_date_opt: str = typer.Option(..., "--ref-date")) -> None
     if lf is None:
         typer.echo("cps: (empty)", err=True)
         raise typer.Exit(1)
-    obs = lf.filter(pl.col("ref_date") == date.fromisoformat(ref_date_opt)).collect()
+    obs = lf.filter(pl.col("ref_date") == _parse_date(ref_date_opt, "--ref-date")).collect()
     meta = fetch_metadata(build_client(settings), Path("data/cps_metadata"))
     typer.echo(str(enrich(obs, meta)))
 
