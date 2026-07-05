@@ -112,3 +112,17 @@ def test_gaps_program_scopes_strict_missed(monkeypatch, tmp_path) -> None:  # C-
     result = runner.invoke(app, ["gaps", "--program", "jolts", "--strict"])
     assert result.exit_code == 1
     assert "acknowledged: 1" in result.output
+
+
+def test_ingest_unknown_program_exits_two(monkeypatch, tmp_path) -> None:  # C-4
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(app, ["ingest", "--program", "CES"])  # uppercase typo
+    assert result.exit_code == 2
+    assert "unknown program" in result.output
+
+
+def test_programs_matches_registry() -> None:  # C-9
+    from bls_stats.cli import PROGRAMS
+    from bls_stats.registry import REGISTRY
+
+    assert PROGRAMS == list(REGISTRY)

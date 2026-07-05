@@ -14,6 +14,7 @@ from datetime import date
 import typer
 
 from bls_stats.core.config import load_settings, storage_options
+from bls_stats.registry import REGISTRY
 
 app = typer.Typer(help="Vintage-aware BLS data downloads and ingest.")
 calendar_app = typer.Typer(help="Release-date calendar.")
@@ -23,7 +24,13 @@ app.add_typer(calendar_app, name="calendar")
 app.add_typer(store_app, name="store")
 app.add_typer(metadata_app, name="metadata")
 
-PROGRAMS = ["ces", "sae", "jolts", "cps", "bed", "qcew", "oews", "ep"]
+PROGRAMS = list(REGISTRY)
+
+
+def _require_program(program: str) -> None:
+    if program not in REGISTRY:
+        typer.echo(f"unknown program {program!r} — choose from {PROGRAMS}", err=True)
+        raise typer.Exit(2)
 
 
 def _setup() -> tuple:
@@ -55,6 +62,8 @@ def ingest(
     import bls_stats.pipeline as pipeline
 
     settings, store = _setup()
+    if program is not None:
+        _require_program(program)
     programs = [program] if program else None
     raise typer.Exit(pipeline.run_ingest(settings, store, programs, dry_run=dry_run))
 
@@ -80,6 +89,7 @@ def backfill(
     from bls_stats.core.periods import reference_periods
 
     settings, store = _setup()
+    _require_program(program)
     if program == "qcew":
         try:
             years = sorted({y for y, _ in reference_periods("qcew", start, end)})
@@ -153,6 +163,7 @@ def calendar_show(program: str = typer.Option(...)) -> None:
     import polars as pl
 
     _, store = _setup()
+    _require_program(program)
     cal = store.read_state("release_calendar")
     if cal is None:
         typer.echo("no calendar — run `bls-stats calendar build`", err=True)
@@ -272,11 +283,11 @@ def store_query(
     """
     import polars as pl
 
-    from bls_stats.registry import REGISTRY
     from bls_stats.storage.reads import as_of as as_of_read
     from bls_stats.storage.reads import latest
 
     _, store = _setup()
+    _require_program(program)
     lf = store.scan_observations(program)
     if lf is None:
         typer.echo(f"{program}: (empty)", err=True)
