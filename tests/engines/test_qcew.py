@@ -47,3 +47,22 @@ def test_output_contract_columns() -> None:
         "downloaded",
     }
     assert set(df.columns) == expected  # year/qtr dropped (BEH §2.2)
+
+
+def test_qcew_read_zip_csv_streams_and_locks_dtypes(tmp_path) -> None:  # C-19
+    import zipfile
+
+    from bls_stats.engines.qcew import _read_zip_csv
+
+    csv = (
+        "area_fips,own_code,industry_code,agglvl_code,size_code,disclosure_code,"
+        "year,qtr,qtrly_estabs,month1_emplvl,month2_emplvl,month3_emplvl,"
+        "total_qtrly_wages,taxable_qtrly_wages,qtrly_contributions,avg_wkly_wage\n"
+        '"01001","0","10","70","0","",2024,1,5,10,10,10,1000,1000,10,500\n'
+    )
+    zpath = tmp_path / "y.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("2024.singlefile.csv", csv)
+    df = _read_zip_csv(zpath)
+    assert df.schema["area_fips"] == pl.Utf8 and df["area_fips"][0] == "01001"  # leading zero kept
+    assert df.schema["avg_wkly_wage"] == pl.Float64
