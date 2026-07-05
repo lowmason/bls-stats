@@ -205,17 +205,21 @@ def _expire_superseded(
 
 
 def _comparator(ledger: Ledger, program: str, revision: int | None) -> int | None:
-    """ARCH §7.3: most recent ingested row_count for the same program and slot type."""
-    got = (
-        ledger.resolved()
-        .filter(
-            (pl.col("program") == program)
-            & (pl.col("status") == "ingested")
-            & pl.col("revision").eq_missing(pl.lit(revision, dtype=pl.Int16))
-        )
-        .sort("ingested_at", descending=True)
+    """ARCH §7.3: most recent ingested row_count for the same program and slot type.
+
+    Prefers a same-revision comparator; falls back to the latest ingested row for the program
+    regardless of revision (e.g. a backfill baseline with null revision) so the first live
+    increment after a backfill is still row-band-checked rather than ungated (C-16)."""
+    ingested = ledger.resolved().filter(
+        (pl.col("program") == program) & (pl.col("status") == "ingested")
     )
-    return int(got["row_count"][0]) if got.height else None
+    same = ingested.filter(pl.col("revision").eq_missing(pl.lit(revision, dtype=pl.Int16))).sort(
+        "ingested_at", descending=True
+    )
+    if same.height:
+        return int(same["row_count"][0])
+    any_row = ingested.sort("ingested_at", descending=True)
+    return int(any_row["row_count"][0]) if any_row.height else None
 
 
 def run_ingest(

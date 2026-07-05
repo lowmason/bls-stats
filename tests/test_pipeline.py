@@ -282,3 +282,16 @@ def test_ingest_ep_only_exits_two(store) -> None:
 
 def test_backfill_ep_exits_two(store) -> None:
     assert run_backfill(Settings(), store, "ep", "2024", "2026", clock=CLOCK) == 2
+
+
+def test_comparator_falls_back_to_latest_ingested(store) -> None:  # C-16
+    from bls_stats.pipeline import _comparator
+    from bls_stats.vintage.ledger import Ledger, SlotRecord
+
+    ledger = Ledger(store)
+    ledger.record([
+        SlotRecord("ces", date(2026, 5, 12), date(2026, 6, 1), None, None,
+                   "backfill", 500, "ingested", NOW),
+    ])
+    # revision=0 increment has no same-revision comparator, but a backfill baseline exists:
+    assert _comparator(ledger, "ces", 0) == 500
