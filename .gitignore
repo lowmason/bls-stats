@@ -5,6 +5,9 @@
 # local data / stores
 data/
 
+# docs build output (published via `mkdocs gh-deploy`, never committed to main)
+site/
+
 # python
 __pycache__/
 *.pyc

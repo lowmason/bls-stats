@@ -1,0 +1,87 @@
+site_name: bls-stats
+site_description: Vintage-aware BLS data ingest to a Delta Lake store on an S3-compatible object store
+site_url: https://lowmason.github.io/bls-stats/
+repo_url: https://github.com/lowmason/bls-stats
+repo_name: lowmason/bls-stats
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            members_order: source
+            filters: ["!^_"]
+            show_root_heading: true
+            show_source: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Concepts:
+      - The vintage model: concepts/vintage-model.md
+      - Release detection & deferral: concepts/release-detection.md
+      - Storage & crash safety: concepts/storage.md
+      - Pipeline, validation & exit codes: concepts/pipeline.md
+  - CLI reference: cli.md
+  - API reference:
+      - Overview: reference/index.md
+      - registry: reference/registry.md
+      - core: reference/core.md
+      - releases: reference/releases.md
+      - vintage: reference/vintage.md
+      - storage: reference/storage.md
+      - engines: reference/engines.md
+      - enrich: reference/enrich.md
+      - pipeline: reference/pipeline.md
+      - cli: reference/cli.md

@@ -7,6 +7,12 @@ from enum import StrEnum
 
 
 class Frequency(StrEnum):
+    """Cadence of a program's reference periods, driving `core.periods` period math.
+
+    `NONE` marks EP, which is not periodic (ARCH §4.3): it has no `ref_date` and is keyed by
+    `release_date` alone.
+    """
+
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
     ANNUAL = "annual"
@@ -14,6 +20,11 @@ class Frequency(StrEnum):
 
 
 class RefDateRule(StrEnum):
+    """How `core.periods.ref_date` maps a `(year, period)` pair to a canonical `ref_date`.
+
+    `NONE` marks EP, whose `ref_date` is always `None` (ARCH §4.3).
+    """
+
     DAY_12 = "day_12"
     LAST_BUSINESS_DAY = "last_business_day"
     QUARTER_END_12 = "quarter_end_12"
@@ -23,6 +34,28 @@ class RefDateRule(StrEnum):
 
 @dataclass(frozen=True)
 class RevisionProfile:
+    """A program's routine/benchmark print lifecycle (ARCH §2.1, §5.3).
+
+    Drives `releases.profiles.expand`, which maps a detected `Release` to its fetch-plan
+    slots using these fields.
+
+    Attributes:
+        routine_slots: Number of prints a routine release structurally carries — e.g. CES
+            carries prints for t, t-1, t-2 (`routine_slots=3`), yielding revisions 0/1/2.
+            Ignored when `routine_rule` is `"year_to_date"`.
+        routine_rule: `"fixed"` (routine slots = `routine_slots`, the common case) or
+            `"year_to_date"` — QCEW's rule (ARCH §6.2): a routine release carries every quarter
+            of the reference year up to and including the newly published one.
+        benchmark_rule: Structural rule identifying a benchmark event from the release's own
+            reference period, never from feed title text (ARCH §5.2): `"jan_data"` (reference
+            month is January), `"q1_data"` (reference quarter is Q1), or `None` for programs
+            with no benchmark event (`oews`, `ep`).
+        benchmark_window_years: Span of the benchmark re-snapshot window (ARCH §2.2): from
+            January (or Q1) of `year(newest ref_date) - benchmark_window_years` through the
+            newest `ref_date`, inclusive. `None` when `benchmark_rule` is `None`. Defaults are
+            empirical placeholders pending verification against real events (ARCH §12).
+    """
+
     routine_slots: int
     routine_rule: str = "fixed"  # "fixed" | "year_to_date" (QCEW, ARCH §6.2)
     benchmark_rule: str | None = None  # "jan_data" | "q1_data" | None (ARCH §5.3)
@@ -31,6 +64,40 @@ class RevisionProfile:
 
 @dataclass(frozen=True)
 class ProgramSpec:
+    """Everything the pipeline needs to know about one of the eight BLS programs.
+
+    Programs are data, not subclasses (ARCH §3): an engine reads a `ProgramSpec` to know which
+    URLs to fetch, how to derive `ref_date`, and which columns identify a unit within the
+    program's observations table.
+
+    Attributes:
+        name: Registry key, e.g. `"ces"`; matches the dict key in `REGISTRY`.
+        frequency: Reference-period cadence; selects the period-math branch in `core.periods`.
+        ref_date_rule: Rule mapping `(year, period)` to the canonical `ref_date`.
+        series_prefix: Two-letter series-ID prefix (key into `SERIES_LAYOUTS`), or `None` for
+            programs with no LABSTAT-style series ID (`qcew`).
+        unit_columns: Column(s) identifying a unit within this program's observations table
+            (ARCH §4.3) — `("series_id",)` for the five LABSTAT programs, the QCEW establishment
+            key, or the OEWS/EP area-occupation key.
+        backfill_url: Stage-1 full-history source (ARCH §6.2), possibly a `str.format`
+            template (QCEW/OEWS use `{year}`/`{yy}`; EP uses `{soc}`).
+        increment_url: Stage-2 routine-fetch source; often the same file as `backfill_url`
+            when the program has no `.Current` variant.
+        benchmark_url: Source for a benchmark-window re-snapshot (ARCH §2.2), or `None` for
+            programs with no benchmark event.
+        feed_url: Atom feed URL polled for release detection (ARCH §5.1), or `None` for EP,
+            which has no feed (ARCH §5.2 exception).
+        archive_url: Archive page scraped for historical release dates (ARCH §5.4), or `None`.
+        schedule_url: Schedule page scraped for upcoming release dates, or `None` when absent
+            or unreliable (QCEW's 404s — tolerated per ARCH §5.4).
+        release_time_et: Scheduled embargo time, `"08:30"` or `"10:00"` ET, used as the
+            stale-file guard floor for `Last-Modified` (ARCH §6.3); `None` for EP.
+        profile: This program's `RevisionProfile`.
+        row_band: Sanity-check tolerance (ARCH §7.3): a fetched frame's row count must fall
+            within this fraction of its comparator's row count.
+        null_rate_max: Sanity-check ceiling (ARCH §7.3) on the `value` column's null rate.
+    """
+
     name: str
     frequency: Frequency
     ref_date_rule: RefDateRule

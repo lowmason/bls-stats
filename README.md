@@ -83,7 +83,17 @@ see exactly what was published by then. Missed prints are permanent — a print 
 you failed to capture is recorded as `missed` and never silently backfilled with a later
 value, which keeps historical reconstructions honest.
 
-## Learn more
+## Documentation
+
+Full documentation — concepts, CLI reference, and the docstring-generated API reference — is
+published at **<https://lowmason.github.io/bls-stats/>** (built with MkDocs + Material +
+mkdocstrings and served from the `gh-pages` branch; no CI required). To work on it locally:
+
+```bash
+uv sync --group docs
+uv run mkdocs serve        # live-reloading preview at http://127.0.0.1:8000
+uv run mkdocs gh-deploy    # build and publish to the gh-pages branch
+```
 
 The full design — program contracts, the vintage schema, release detection, storage layout,
 CLI surface, and the testing strategy — lives in

@@ -13,7 +13,7 @@ _QUARTER_END_MONTH = {1: 3, 2: 6, 3: 9, 4: 12}
 
 
 class PeriodError(ValueError):
-    pass
+    """An invalid period string, out-of-range component, or unknown program name."""
 
 
 def _spec(program: str):
@@ -54,6 +54,25 @@ def _from_index(idx: int, n: int) -> Period:
 
 
 def reference_periods(program: str, start: str, end: str) -> list[Period]:
+    """Enumerate every `(year, period)` pair in `[start, end]`, inclusive of both ends.
+
+    The period grammar is program-frequency-dependent (BEH §3): `"YYYY/MM"` (01-12) for
+    monthly programs, `"YYYY/Q"` (1-4) for quarterly programs, and plain `"YYYY"` for
+    annual/non-periodic programs (the period component of the returned tuples is always `1`
+    in that case).
+
+    Args:
+        program: Registry key, e.g. `"ces"` or `"qcew"`. Selects the period grammar.
+        start: Inclusive range start, in the program's period grammar.
+        end: Inclusive range end, in the program's period grammar.
+
+    Returns:
+        `(year, period)` tuples in ascending order, one per period in the range.
+
+    Raises:
+        PeriodError: `start`/`end` don't match the program's grammar, a component is
+            out of range, `start` is after `end`, or `program` is unknown.
+    """
     lo, hi = _parse(program, start), _parse(program, end)
     n = _per_year(program)
     a, b = _to_index(lo, n), _to_index(hi, n)
@@ -63,11 +82,26 @@ def reference_periods(program: str, start: str, end: str) -> list[Period]:
 
 
 def shift(program: str, year: int, period: int, by: int) -> Period:
+    """Return the period `by` steps from `(year, period)`, wrapping across year boundaries.
+
+    A step is one month for monthly programs, one quarter for quarterly programs, and one
+    year for annual/non-periodic programs. `by` may be negative.
+
+    Args:
+        program: Registry key; determines the step size via the program's frequency.
+        year: Starting year.
+        period: Starting period (month 1-12, quarter 1-4, or 1 for annual programs).
+        by: Number of steps to shift, positive or negative.
+
+    Returns:
+        The resulting `(year, period)` pair.
+    """
     n = _per_year(program)
     return _from_index(_to_index((year, period), n) + by, n)
 
 
 def last_business_day(year: int, month: int) -> date:
+    """Return the last weekday (Mon-Fri) of the given month — JOLTS' `ref_date` anchor (BEH §4)."""
     nxt = date(year + (month == 12), month % 12 + 1, 1)
     d = nxt - timedelta(days=1)
     while d.weekday() >= 5:  # Sat/Sun
@@ -76,6 +110,21 @@ def last_business_day(year: int, month: int) -> date:
 
 
 def ref_date(program: str, year: int, period: int) -> date | None:
+    """Map a `(year, period)` pair to its canonical `ref_date` per the program's rule (BEH §4).
+
+    The mapping is dictated by `ProgramSpec.ref_date_rule`: the 12th of the month for
+    day-12 programs, the last business day of the month for JOLTS, the 12th of the
+    quarter-ending month for quarterly programs, or May 12th for OEWS.
+
+    Args:
+        program: Registry key.
+        year: Reference year.
+        period: Reference period (month, quarter, or 1 for annual programs).
+
+    Returns:
+        The canonical `ref_date`, or `None` for EP — which is not periodic and carries no
+        `ref_date` at all (ARCH §4.3).
+    """
     rule = _spec(program).ref_date_rule
     if rule == RefDateRule.DAY_12:
         return date(year, period, 12)

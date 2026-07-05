@@ -1,4 +1,13 @@
-"""QCEW per-year ZIP engine (BEH §2.2). Strictly one year at a time (ARCH §10)."""
+"""QCEW per-year ZIP engine (BEH §2.2). Strictly one year at a time (ARCH §10).
+
+QCEW publishes one ZIP per year containing every quarter, plus a separate Q1-only "by size
+class" ZIP. The two files split the `size_code` domain: the singlefile ZIP carries only
+`size_code == "0"` (all establishment sizes combined) at every `agglvl_code`, while the by-size
+ZIP carries the non-"0" size-class breakdowns. A benchmark/finalization event needs both; a
+routine touched-quarter event needs only the singlefile. Processing one year (and, within
+that, one size variant) at a time keeps peak memory bounded per ARCH §10's < 8 GB target —
+QCEW is the largest per-file program in the registry.
+"""
 
 from __future__ import annotations
 
@@ -38,6 +47,11 @@ SIZE_URL = "https://data.bls.gov/cew/data/files/{year}/csv/{year}_q1_by_size.zip
 
 
 def _read_zip_csv(zip_path: Path) -> pl.DataFrame:
+    """Read the single CSV member of a QCEW ZIP with locked dtypes.
+
+    Code columns are read as `Utf8` to preserve leading zeros and alpha `area_fips` values
+    (e.g. `"C1010"` for CSA-level rows) that a type-inferred read would corrupt.
+    """
     with zipfile.ZipFile(zip_path) as zf:
         member = next(n for n in zf.namelist() if n.endswith(".csv"))
         with zf.open(member) as fh:
@@ -56,6 +70,26 @@ def parse_year_zip(
     downloaded: datetime,
     by_size_zip: Path | None = None,
 ) -> pl.DataFrame:
+    """Parse one year's QCEW singlefile ZIP (and optionally its by-size companion).
+
+    Filters both inputs to the requested quarters, splits them on `size_code` (singlefile
+    keeps `"0"`, by-size keeps everything else — see module docstring), concatenates, and
+    attaches `ref_date` per quarter via `QUARTER_END_12`.
+
+    Args:
+        zip_path: Local path to the year's `{year}_qtrly_singlefile.zip`.
+        quarters: Quarter numbers (1-4) to keep — the event's touched-quarter set (ARCH §6.2).
+        downloaded: Wall-clock ingestion timestamp; stamped onto every row as `downloaded`.
+        by_size_zip: Local path to the year's `{year}_q1_by_size.zip`, or `None` to skip the
+            by-size breakdown (routine touched-quarter events don't need it; benchmark/
+            finalization events do).
+
+    Returns:
+        A `pl.DataFrame` with the QCEW code columns (`area_fips`, `own_code`, `industry_code`,
+        `agglvl_code`, `size_code`, `disclosure_code`, all `Utf8`), the value columns
+        (`Float64`), `ref_date` (`Date`), and `downloaded` (`Datetime("us")`). `year` and `qtr`
+        are dropped after being consumed for the `ref_date` join.
+    """
     df = _read_zip_csv(zip_path).filter(
         pl.col("qtr").is_in(quarters) & (pl.col("size_code") == "0")
     )
@@ -88,6 +122,21 @@ def fetch_year(
     *,
     with_size: bool = False,
 ) -> pl.DataFrame:
+    """Download one year's QCEW ZIP(s), parse to the requested quarters, and clean up scratch.
+
+    Args:
+        client: Shared `httpx.Client`.
+        year: Calendar year to fetch — QCEW is processed strictly one year at a time (module
+            docstring; ARCH §10 memory discipline).
+        quarters: Quarter numbers (1-4) to keep.
+        dest_dir: Scratch directory for the downloaded ZIP(s); not durable storage.
+        downloaded: Wall-clock ingestion timestamp, forwarded to `parse_year_zip`.
+        with_size: If `True`, also download and merge the by-size ZIP (needed for benchmark/
+            finalization events; skipped for routine touched-quarter events).
+
+    Returns:
+        The parsed `pl.DataFrame`, per `parse_year_zip`.
+    """
     zip_path = download(client, URL.format(year=year), dest_dir / f"qcew_{year}.zip")
     size_path = None
     if with_size:

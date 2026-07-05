@@ -1,4 +1,11 @@
-"""Orchestrator (ARCH §7): detect → expand → fetch → validate → commit → record."""
+"""Orchestrator (ARCH §7): detect → expand → fetch → validate → commit → record.
+
+Drives both entry points that land data in the vintage store — `run_ingest` (the daily
+incremental crontab line) and `run_backfill` (the one-time historical seed) — plus the
+shared pieces they call: `stamp` (vintage columns), `validate` (pre-commit gates), and
+the crash-safe commit-then-record sequencing (ARCH §7.2). `ep` is excluded from both
+paths pending a storage-schema decision for its non-periodic wide frames (ARCH §12).
+"""
 
 from __future__ import annotations
 
@@ -24,7 +31,11 @@ log = logging.getLogger(__name__)
 
 
 class ValidationError(RuntimeError):
-    pass
+    """Raised by `validate` when a frame fails a pre-commit gate (ARCH §7.3).
+
+    Failing validation fails only the event that raised it; the run continues with the
+    next event (ARCH §7.4).
+    """
 
 
 def _utcnow() -> datetime:
@@ -40,6 +51,31 @@ def stamp(
     source: str,
     downloaded: datetime,
 ) -> pl.DataFrame:
+    """Append the vintage columns (ARCH §4.3) to a fetched frame.
+
+    Adds `release_date` (`pl.Date`), `revision`/`benchmark` (`pl.Int16`, nullable — null
+    for backfill rows per the honesty rule), `source` (`pl.Utf8`, `"increment"` or
+    `"backfill"`), and `downloaded` (`pl.Datetime("us", "UTC")`, cast to microsecond
+    precision regardless of the input clock's resolution). `ref_date` is added as a
+    typed-null `pl.Date` column only when the frame doesn't already carry one (engines
+    that stream multiple ref_dates per event, e.g. QCEW/CES, stamp `ref_date` themselves
+    upstream); when `ref` is `None` the added column is a null of the correct dtype, not
+    a Python `None` that would infer as another type.
+
+    Args:
+        df: Fetched, unstamped frame for one slot or event.
+        ref: Canonical period date for this slot, or `None` for non-periodic programs
+            (EP) and for events that already stamped `ref_date` per-row.
+        release: The BLS release date (increment) or snapshot date (backfill); becomes
+            the partition key `release_date`.
+        revision: Structural print counter (ARCH §2.1), or `None` for backfill rows.
+        benchmark: Benchmark counter (ARCH §2.1), or `None` for backfill rows.
+        source: `"increment"` or `"backfill"`.
+        downloaded: Wall-clock ingestion time (injected, never `datetime.now()` inline).
+
+    Returns:
+        `df` with the vintage columns appended (and `ref_date` added if absent).
+    """
     out = df.with_columns(
         pl.lit(release).alias("release_date"),
         pl.lit(revision, dtype=pl.Int16).alias("revision"),
@@ -53,7 +89,33 @@ def stamp(
 
 
 def validate(df: pl.DataFrame, program: str, comparator_count: int | None) -> None:
-    """ARCH §7.3 gates 1 & 3 (gate 2 — emptiness — is handled by the caller as a deferral)."""
+    """Pre-commit validation gates 1 and 3 of ARCH §7.3.
+
+    Gate 2 (emptiness) is not checked here — the caller treats an empty slice as a
+    deferral, not a validation failure, since it means data lags the announcement rather
+    than being malformed (ARCH §7.3-2).
+
+    Checked, in order:
+    1. **Schema** — every one of the program's registry-declared `unit_columns` is
+       present and typed `pl.Utf8` (leading zeros in codes like `series_id`/`area_fips`
+       must survive; an inferred numeric dtype would silently corrupt them).
+    2. **Null-rate** — if a `value` column is present, its null fraction must not exceed
+       the program's `null_rate_max` (registry default 5%).
+    3. **Row-count band** — if `comparator_count` is a positive int, `df.height` must
+       fall within ±`row_band` (registry default 20%) of it. A `None` or `0` comparator
+       (no prior ingested slot of this type — e.g. a program's first increment) skips
+       this gate rather than failing it.
+
+    Args:
+        df: Stamped or unstamped frame for one slot, already sliced to its `ref_date`.
+        program: Registry key selecting the `ProgramSpec` (unit columns, thresholds).
+        comparator_count: Row count of the most recent ingested slot of the same program
+            and slot type (see `_comparator`), or `None` if there is none yet.
+
+    Raises:
+        ValidationError: On any gate failure, naming the program and the specific
+            violation (missing/mistyped unit column, null-rate, or row-count band).
+    """
     spec = REGISTRY[program]
     for col in spec.unit_columns:
         if col not in df.columns:
@@ -167,6 +229,53 @@ def run_ingest(
     fetch_fn=None,
     fresh_fn=None,
 ) -> int:
+    """Daily incremental ingest: detect → expand → fetch → validate → commit → record.
+
+    The one daily crontab line (ARCH §8). Polls each program's release feed, expands new
+    releases into slots via `profiles.expand`, and drives each event through
+    `_process_event`. An event is skipped entirely if every one of its slots already
+    resolves to `"ingested"` or `"missed"` in the ledger — the anti-join that makes
+    re-running the whole ingest idempotent and safe as a dumb cron (ARCH §5.1, §7.2).
+    After an event that made forward progress (`_process_event` returns `"ok"`), any
+    older `deferred` slot for the same program that the new release's date has now
+    superseded is flipped to `"missed"` (ARCH §5.3) — never by wall-clock timeout.
+
+    Crash safety: for each slot, data is appended to the Delta table before the ledger
+    records it, so the only crash-inconsistent state is "committed, not yet recorded" —
+    the safe direction. On re-run, `store.slot_exists` detects the already-committed slot
+    (null-safe on the backfill counters) and `_process_event` repairs the ledger without
+    re-appending (ARCH §7.2).
+
+    Args:
+        settings: Environment-derived config used to build the HTTP client.
+        store: Vintage store backend (Delta or the Parquet escape hatch).
+        programs: Programs to poll; defaults to every registry program except `ep`,
+            which is not yet wired to the vintage store (ARCH §12). Passing `["ep"]`
+            explicitly (or an all-`ep` list) logs an error and returns `2` rather than
+            silently no-opping.
+        dry_run: If `True`, run the full pipeline including validation but skip both the
+            Delta append and the ledger write — nothing durable changes.
+        clock: Injected wall clock for `downloaded`/`ingested_at` timestamps; defaults to
+            `datetime.now(UTC)`. Tests pass a fixed clock so multi-run scenarios can
+            control ledger ordering deterministically.
+        poll_fn (Callable | None): Injected replacement for `feeds.poll(client, programs)`;
+            defaults to the live Atom-feed poller. Tests substitute a canned list of
+            `Release` events.
+        fetch_fn (Callable | None): Injected replacement for the per-event fetch dispatch
+            (default `_fetch_event`); tests substitute a fake that returns a fixed frame
+            or raises.
+        fresh_fn (Callable | None): Injected replacement for the stale-file guard (default
+            `engines.labstat.is_fresh`); tests substitute a fixed freshness verdict to
+            exercise the deferral path without live `Last-Modified` checks.
+
+    Returns:
+        Exit code per ARCH §7.4: `0` if there were no new events, or every event that ran
+        ended in `"ok"` or `"deferred"` (a benign lag — a stale upstream file or an empty
+        slice — never pages ops). `1` if at least one event `"failed"` but not all of them
+        did, or any event was `"partial"` (it raised after already appending data for some
+        of its slots — the commit happened, so this is not a clean failure and must not be
+        silently reported as success). `2` if every event that ran `"failed"` outright.
+    """
     clock = clock or _utcnow
     programs = programs or [p for p in REGISTRY if p != "ep"]  # ep: ARCH §5.2 exception
     if "ep" in programs:
@@ -230,6 +339,14 @@ def _process_event(
     fetch_fn,
     fresh_fn,
 ) -> str:
+    """Run one release event through fetch → validate → commit → record.
+
+    Returns one of four outcome strings that `run_ingest` aggregates into its exit code
+    (ARCH §7.4): `"ok"` (at least one slot committed or ledger-repaired), `"deferred"`
+    (every slot deferred — stale upstream file or an empty slice — nothing committed),
+    `"partial"` (an exception was raised after this event had already appended data for
+    at least one slot), or `"failed"` (an exception was raised with no prior append).
+    """
     program = release.program
     label = f"{program} release {release.release_date}"
     appended = 0
@@ -311,6 +428,39 @@ def run_backfill(
     clock: Callable[[], datetime] | None = None,
     fetch_fn=None,
 ) -> int:
+    """Stage-1 historical seed: fetch, stamp, and commit one program's published history.
+
+    Resolves `start`/`end` to concrete periods via `reference_periods` and
+    `filter_published` (which needs the `release_calendar` state table already built —
+    ARCH §5.4), fetches them in one event, and stamps each row as a snapshot-date vintage:
+    `release_date` = the run's snapshot date and `revision`/`benchmark` = `null` — print
+    history that predates this pipeline was never observed, so it is not fabricated (the
+    ARCH §4.3 backfill honesty rule). Idempotent the same way as `run_ingest`: periods
+    already `"ingested"` in the ledger for this snapshot are skipped, and `store.slot_exists`
+    (null-safe on the null counters) guards against a duplicate append on re-run after a
+    crash between commit and record.
+
+    Args:
+        settings: Environment-derived config used to build the HTTP client.
+        store: Vintage store backend (Delta or the Parquet escape hatch).
+        program: Registry program key. `"ep"` is rejected — EP has no reference periods
+            to backfill (it is snapshot/cycle-based, not periodic).
+        start: Range start as `YYYY/MM`, `YYYY/Q`, or `YYYY`, per the program's frequency.
+        end: Range end, same format as `start`.
+        dry_run: If `True`, fetch and validate but skip both the Delta append and the
+            ledger write.
+        clock: Injected wall clock for `downloaded`/`ingested_at` and the snapshot date
+            itself; defaults to `datetime.now(UTC)`.
+        fetch_fn (Callable | None): Injected replacement for the fetch dispatch (default
+            `_fetch_event`); tests substitute a fixed frame.
+
+    Returns:
+        `0` on success, including the no-op cases of an already-complete backfill or a
+        range with no published periods. `2` if `program` is `"ep"`, the release calendar
+        hasn't been built yet, `start`/`end` fail to parse as period strings, or the fetch
+        step raises. There is no `1` (partial) outcome — a single event covers the whole
+        range, so a failure here has no partially-successful state to distinguish.
+    """
     clock = clock or _utcnow
     now = clock()
     if program == "ep":

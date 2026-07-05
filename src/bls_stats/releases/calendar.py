@@ -23,6 +23,9 @@ CALENDAR_SCHEMA: dict[str, pl.DataType] = {
     "original_release": pl.Date,
     "is_benchmark": pl.Boolean,
 }
+"""Column schema of `state/release_calendar` (ARCH §4.5). `release_date` null means the release
+was cancelled by the lapse overlay; `original_release` is null unless the lapse overlay
+rescheduled or cancelled the row, in which case it holds the pre-revision date."""
 
 _LINK_DATE = re.compile(r"_(\d{2})(\d{2})(\d{4})\.htm")
 _MONTHS = {
@@ -53,6 +56,16 @@ _ABBR = {m[:3]: i for m, i in _MONTHS.items()}
 
 
 def parse_ref_from_text(text: str, program: str) -> tuple[int, int] | None:
+    """Extract `(ref_year, ref_period)` from archive/schedule row text, unlike feed titles
+    (`releases.feeds._ref_period`), calendar page text always spells out the year.
+
+    Args:
+        text: Row or link text scraped from an archive or schedule page.
+        program: Registry key; selects the month/quarter/annual pattern via `frequency`.
+
+    Returns:
+        `(ref_year, ref_period)`, or `None` if no matching pattern is found.
+    """
     freq = REGISTRY[program].frequency
     if freq == Frequency.MONTHLY:
         m = _MONTH_YEAR.search(text)
@@ -65,6 +78,14 @@ def parse_ref_from_text(text: str, program: str) -> tuple[int, int] | None:
 
 
 def parse_abbr_date(text: str) -> date | None:
+    """Parse a `"Mon. D, YYYY"`-style abbreviated date (schedule/lapse page format).
+
+    Args:
+        text: Text to search for the pattern, e.g. `"Jul. 2, 2026"`.
+
+    Returns:
+        The parsed date, or `None` if no match, or the month abbreviation is unrecognized.
+    """
     m = _ABBR_DATE.search(text)
     if not m or m.group(1) not in _ABBR:
         return None
@@ -89,6 +110,21 @@ def _frame(rows: list[dict]) -> pl.DataFrame:
 
 
 def scrape_archive(html: bytes, program: str) -> pl.DataFrame:
+    """Scrape a program's archive page into calendar rows covering historical releases.
+
+    Finds every link matching the `..._MMDDYYYY.htm` archive-date pattern, pairs its embedded
+    release date with the reference period parsed from the link's text, and looks up
+    `is_benchmark` structurally from the program's `benchmark_rule`. Links without a
+    parseable reference period are skipped.
+
+    Args:
+        html: Raw archive page HTML.
+        program: Registry key.
+
+    Returns:
+        A `CALENDAR_SCHEMA` frame with `original_release` always null (archive pages carry no
+        revision history — that comes from `apply_lapse_overlay`).
+    """
     soup = BeautifulSoup(html, "lxml")
     rows = []
     for a in soup.find_all("a", href=_LINK_DATE):
@@ -101,6 +137,18 @@ def scrape_archive(html: bytes, program: str) -> pl.DataFrame:
 
 
 def scrape_schedule(html: bytes, program: str) -> pl.DataFrame:
+    """Scrape a program's schedule page into calendar rows covering upcoming releases.
+
+    Each table row must yield both a reference period and an abbreviated release date to be
+    kept — rows missing either are silently dropped.
+
+    Args:
+        html: Raw schedule page HTML.
+        program: Registry key.
+
+    Returns:
+        A `CALENDAR_SCHEMA` frame with `original_release` always null.
+    """
     soup = BeautifulSoup(html, "lxml")
     rows = []
     for tr in soup.find_all("tr"):
@@ -113,6 +161,23 @@ def scrape_schedule(html: bytes, program: str) -> pl.DataFrame:
 
 
 def apply_lapse_overlay(cal: pl.DataFrame, html: bytes) -> pl.DataFrame:
+    """Apply a government-lapse revised-release-dates table on top of a scraped calendar.
+
+    Each overlay row names an original release date and either a revised date or a
+    cancellation. A matching calendar row (by `release_date == original` and a program whose
+    release-name text parses against the row's period) is updated: on reschedule, the
+    original `release_date` moves to `original_release` and the new date becomes
+    `release_date`; on cancellation, `release_date` becomes null and `original_release` still
+    records what was originally scheduled. Rows with an unparseable original date, or neither
+    a parseable revised date nor a cancellation marker, are skipped.
+
+    Args:
+        cal: A calendar frame (`CALENDAR_SCHEMA`) to overlay, e.g. from `scrape_archive`.
+        html: Raw HTML of a lapse-revision table (see `LAPSE_URLS`).
+
+    Returns:
+        `cal` with matching rows rewritten in place (a new frame; `cal` itself is untouched).
+    """
     soup = BeautifulSoup(html, "lxml")
     for tr in soup.find_all("tr"):
         cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
@@ -151,9 +216,25 @@ LAPSE_URLS = (
     "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm",
     "https://www.bls.gov/bls/updated_release_schedule.htm",
 )
+"""Government-lapse revised-release-dates pages applied on top of every scrape (ARCH §5.4)."""
 
 
 def build(client: httpx.Client, programs: list[str]) -> pl.DataFrame:
+    """Scrape a full release calendar for `programs`: archive + schedule + lapse overlay.
+
+    Per-program tolerance for missing sources (ARCH §5.4): a program with no `archive_url` /
+    `schedule_url` configured, or whose page fetch fails, is logged at WARNING and skipped
+    rather than aborting the whole build (e.g. QCEW's schedule page 404s). Requests are
+    throttled at a fixed 2-second interval across all pages, including the lapse overlay.
+
+    Args:
+        client: The shared `httpx.Client`.
+        programs: Registry keys to scrape.
+
+    Returns:
+        A `CALENDAR_SCHEMA` frame, deduped on `(program, ref_date, release_date)` (keeping the
+        first occurrence) and sorted by `(program, ref_date)`.
+    """
     from bls_stats.core.http import Throttle, get
 
     throttle = Throttle(2.0)
@@ -185,6 +266,20 @@ def build(client: httpx.Client, programs: list[str]) -> pl.DataFrame:
 
 
 def find_gaps(cal: pl.DataFrame) -> pl.DataFrame:
+    """Find reference periods missing from the calendar within each program's observed span.
+
+    For each periodic program (monthly/quarterly; annual and non-periodic programs are
+    skipped), walks every period from its earliest to latest observed `ref_date` and reports
+    any that has no calendar row at all — a scrape/coverage gap, distinct from a release the
+    calendar explicitly marks cancelled (null `release_date`, still present as a row).
+
+    Args:
+        cal: A calendar frame (`CALENDAR_SCHEMA`), e.g. from `build`.
+
+    Returns:
+        A frame with `program` (`Utf8`) and `ref_date` (`Date`) columns, one row per missing
+        period.
+    """
     out: list[dict] = []
     for program in cal["program"].unique().sort().to_list():
         freq = REGISTRY[program].frequency
@@ -205,7 +300,29 @@ def find_gaps(cal: pl.DataFrame) -> pl.DataFrame:
 
 
 def filter_published(program: str, periods: list[Period], cal: pl.DataFrame) -> list[Period]:
-    """ARCH §5.4 pinned semantics: drop only future-of-latest-published and cancelled periods."""
+    """Restrict a candidate period list to those the calendar confirms were published.
+
+    ARCH §5.4 pinned semantics: drop only (a) periods later than the program's latest
+    published `ref_date` and (b) periods explicitly cancelled (a calendar row with a null
+    `release_date`). Periods predating calendar coverage **pass through unfiltered** — archive
+    scrapes don't reach as far back as the oldest flat-file history (CES starts 1939; no
+    archive goes back that far), and a period's presence in the bulk file is itself proof of
+    publication. Strict membership against the calendar would silently discard decades of
+    history, so this is a deny-list, not an allow-list.
+
+    Args:
+        program: Registry key.
+        periods: Candidate `(year, period)` pairs to filter, typically from
+            `core.periods.reference_periods`.
+        cal: A calendar frame (`CALENDAR_SCHEMA`) containing at least this program's rows.
+
+    Returns:
+        The subset of `periods` not excluded by either rule, in input order.
+
+    Raises:
+        ValueError: The calendar has no published (non-null `release_date`) row for
+            `program` at all — bootstrap order violation; run `calendar build` first.
+    """
     mine = cal.filter(pl.col("program") == program)
     published = mine.filter(pl.col("release_date").is_not_null())
     if published.is_empty():

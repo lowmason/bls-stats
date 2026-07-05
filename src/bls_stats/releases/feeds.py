@@ -43,11 +43,30 @@ _ANNUAL_RE = re.compile(r"\bMay (\d{4})\b")
 
 
 class FeedParseError(ValueError):
-    pass
+    """Reserved for feed-level parse failures; entry-level issues are logged and skipped
+    instead (see `parse_feed`), so this is not currently raised."""
 
 
 @dataclass(frozen=True)
 class Release:
+    """One detected BLS release event for a single program (ARCH §5.1).
+
+    Produced by `parse_feed`/`poll` from an Atom feed entry. Shared feeds (CES/CPS via
+    `empsit`) fan out to one `Release` per program before any ledger anti-join (ARCH §5.2),
+    so each program's event carries its own `is_benchmark` determination.
+
+    Attributes:
+        program: Registry key, e.g. `"ces"`.
+        release_date: The date this release was (or will be) published, parsed from the
+            archive-link href — the only stable identity key (ARCH §5.2); never from feed
+            timestamps.
+        ref_year: Reference year of the data this release covers.
+        ref_period: Reference period within `ref_year` — month (1-12), quarter (1-4), or 1
+            for annual programs — inferred from title text (year is never present, ARCH §5.2).
+        is_benchmark: Whether this release is a benchmark event, determined structurally from
+            `ref_period` via the program's `benchmark_rule` (ARCH §5.2) — never from feed text.
+    """
+
     program: str
     release_date: date
     ref_year: int
@@ -64,6 +83,8 @@ def _infer_year(month: int, published: date) -> int:
 
 
 def _ref_period(text: str, freq: Frequency, release_date: date) -> tuple[int, int] | None:
+    """Extract `(ref_year, ref_period)` from entry text. Only monthly titles omit the year
+    (ARCH §5.2) and need `_infer_year`; quarterly/annual titles spell the year out directly."""
     if freq == Frequency.MONTHLY:
         m = _MONTH_RE.search(text)
         if not m:
@@ -82,6 +103,24 @@ def _is_benchmark(rule: str | None, ref_period: int) -> bool:
 
 
 def parse_feed(xml_bytes: bytes, program: str) -> list[Release]:
+    """Parse one program's Atom feed body into `Release` events, oldest first (ARCH §5.1-§5.2).
+
+    Feeds are Atom 1.0 despite the `.rss` extension. Each entry's release date comes from the
+    archive-link href (`..._MMDDYYYY.htm`) — the only stable identity key; the Atom `id` is not
+    stable (observed edited in place on `cewbd`) and entry timestamps are unreliable (embargo
+    quirks, mislabeled UTC on some feeds). An entry without a parseable link or reference
+    period is logged at WARNING and skipped rather than raising — calendar gaps and malformed
+    entries are expected, not fatal (ARCH §5.2).
+
+    Args:
+        xml_bytes: Raw Atom feed body.
+        program: Registry key whose `frequency` and `benchmark_rule` drive parsing — pass the
+            program explicitly even for a shared feed (e.g. call once each for `"ces"` and
+            `"cps"` against the same `empsit` bytes) so each gets its own `is_benchmark` rule.
+
+    Returns:
+        `Release` events sorted by `release_date` ascending. Empty if no entry parsed.
+    """
     spec = REGISTRY[program]
     root = ElementTree.fromstring(xml_bytes)
     releases: list[Release] = []
@@ -115,7 +154,23 @@ def parse_feed(xml_bytes: bytes, program: str) -> list[Release]:
 
 
 def poll(client: httpx.Client, programs: list[str]) -> list[Release]:
-    """Fetch each distinct feed once; fan out shared feeds BEFORE any ledger logic (ARCH §5.2)."""
+    """Fetch each distinct feed once and parse it for every program that shares it.
+
+    Groups `programs` by their `feed_url` so a shared feed (CES/CPS via `empsit`) is
+    downloaded a single time, then calls `parse_feed` once per program against those same
+    bytes — the fan-out happens here, before any ledger anti-join (ARCH §5.2), so each
+    program's events and failure isolation stay independent downstream. EP is skipped (no
+    feed, ARCH §5.2 exception). A feed that fails to fetch logs a warning and is skipped for
+    this run; the programs it would have covered continue via the ledger's next poll.
+
+    Args:
+        client: The shared `httpx.Client`.
+        programs: Registry keys to poll, e.g. `["ces", "cps", "jolts"]`.
+
+    Returns:
+        `Release` events across all requested programs and their feeds, sorted by
+        `release_date` ascending.
+    """
     from bls_stats.core.http import get
 
     by_feed: dict[str, list[str]] = {}

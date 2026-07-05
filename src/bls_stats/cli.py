@@ -1,4 +1,9 @@
-"""typer CLI (ARCH §8). Thin adapters only — logic lives in pipeline/releases/storage."""
+"""typer CLI (ARCH §8). Thin adapters only — logic lives in pipeline/releases/storage.
+
+Commands parse options, call into `bls_stats.pipeline`, `bls_stats.releases`, or
+`bls_stats.storage`, and translate the result into stdout/stderr text and a process exit
+code. No orchestration, validation, or storage logic lives in this module.
+"""
 
 from __future__ import annotations
 
@@ -42,7 +47,11 @@ def ingest(
     program: str | None = typer.Option(None, help="One program; default: all feed-driven."),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """Daily incremental ingest — the one daily crontab line (ARCH §8)."""
+    """Daily incremental ingest — the one daily crontab line (ARCH §8).
+
+    Exit code is `bls_stats.pipeline.run_ingest`'s return value, unchanged: `0` on
+    success or deferrals-only, `1` on partial failure, `2` if every event failed.
+    """
     import bls_stats.pipeline as pipeline
 
     settings, store = _setup()
@@ -57,7 +66,16 @@ def backfill(
     end: str = typer.Option(...),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """Stage-1 historical seed (ARCH §8). QCEW runs per year for memory discipline."""
+    """Stage-1 historical seed (ARCH §8). QCEW runs per year for memory discipline.
+
+    For `qcew`, `start`/`end` are parsed to whole calendar years and each year is
+    backfilled as its own `run_backfill` call (one year of quarters at a time, to keep
+    peak memory bounded); the exit code is the worst (`max`) of the per-year codes. Every
+    other program runs as a single `run_backfill` call. Exit code is `0` on success
+    (including an already-complete or empty range) or `2` on a bad period string, an
+    unbuilt release calendar, `program="ep"`, or a fetch failure — propagated unchanged
+    from `bls_stats.pipeline.run_backfill`.
+    """
     import bls_stats.pipeline as pipeline
     from bls_stats.core.periods import reference_periods
 
@@ -78,7 +96,13 @@ def backfill(
 
 @calendar_app.command("build")
 def calendar_build() -> None:
-    """Full archive+schedule scrape with lapse overlay (ARCH §5.4)."""
+    """Full archive+schedule scrape with lapse overlay (ARCH §5.4).
+
+    Rebuilds the `release_calendar` state table from scratch for every program except
+    `ep` (which has no archive/schedule pages — ARCH §5.2). Run once to bootstrap before
+    the first `backfill`, and thereafter only to pick up structural changes; `calendar
+    refresh` is the cheap day-to-day update. Always exits `0`.
+    """
     from bls_stats.core.http import build_client
     from bls_stats.releases.calendar import build
 
@@ -90,7 +114,12 @@ def calendar_build() -> None:
 
 @calendar_app.command("refresh")
 def calendar_refresh() -> None:
-    """Cheap keep-current poll from the feeds."""
+    """Cheap keep-current poll from the feeds.
+
+    Appends the current feed state (up to 12 entries per program, ARCH §5.2) to the
+    `release_calendar` table rather than rebuilding it — much cheaper than `calendar
+    build`, suitable for frequent runs. Always exits `0`.
+    """
     import polars as pl
 
     from bls_stats.core.http import build_client
@@ -116,6 +145,11 @@ def calendar_refresh() -> None:
 
 @calendar_app.command("show")
 def calendar_show(program: str = typer.Option(...)) -> None:
+    """Print one program's release-calendar rows, sorted by `ref_date`.
+
+    Exits `1` if the `release_calendar` state table hasn't been built yet (run
+    `calendar build` first); `0` otherwise, even if `program` has no rows.
+    """
     import polars as pl
 
     _, store = _setup()
@@ -131,7 +165,18 @@ def gaps(
     program: str | None = typer.Option(None),
     strict: bool = typer.Option(False, "--strict", help="missed prints also exit non-zero"),
 ) -> None:
-    """Unexplained gaps exit non-zero; recorded missed/deferred are acknowledged (ARCH §8)."""
+    """Unexplained gaps exit non-zero; recorded missed/deferred are acknowledged (ARCH §8).
+
+    Diffs the release calendar's expected `(program, ref_date)` pairs against the ledger.
+    A gap with no ledger row at all (of any status) is "unexplained" — the calendar
+    expected a release and nothing was ever recorded for it. A gap with a `missed` or
+    `deferred` ledger row is "acknowledged": printed for visibility but not treated as a
+    failure, so one historical outage doesn't alarm on every subsequent run.
+
+    Exits `1` if any unexplained gap exists, or if `--strict` is set and any acknowledged
+    gap has status `missed` (for one-off audits that want permanent gaps to fail too);
+    `1` also if the release calendar hasn't been built yet. Exits `0` otherwise.
+    """
     import polars as pl
 
     from bls_stats.releases.calendar import find_gaps
@@ -159,6 +204,11 @@ def gaps(
 
 @store_app.command("info")
 def store_info(program: str | None = typer.Option(None)) -> None:
+    """Print row count and vintage span (min/max `release_date`) per program.
+
+    Reports `(empty)` for a program with no observations table yet rather than erroring.
+    Always exits `0`.
+    """
     import polars as pl
 
     _, store = _setup()
@@ -177,7 +227,11 @@ def store_info(program: str | None = typer.Option(None)) -> None:
 
 @store_app.command("maintain")
 def store_maintain() -> None:
-    """Delta optimize/compact + vacuum — the weekly crontab line (ARCH §4.1)."""
+    """Delta optimize/compact + vacuum — the weekly crontab line (ARCH §4.1).
+
+    Skips programs with no observations table. Vacuum retention is 7 days, so it cannot
+    remove a file still referenced by any live vintage. Always exits `0`.
+    """
     from deltalake import DeltaTable
 
     _, store = _setup()
@@ -197,6 +251,15 @@ def store_query(
     as_of: str | None = typer.Option(None, help="YYYY-MM-DD point-in-time (inclusive)"),
     all_vintages: bool = typer.Option(False, "--all-vintages"),
 ) -> None:
+    """Vintage-aware read for one program/`ref_date`: latest, as-of, or full history.
+
+    Default (neither flag) prints one row per unit — the latest print, using the §4.4
+    tie-break. `--as-of D` restricts to vintages with `release_date <= D` (inclusive)
+    before taking the latest, guaranteeing no future vintage leaks into a point-in-time
+    read. `--all-vintages` dumps every print for the `ref_date`, sorted oldest to newest.
+
+    Exits `1` if the program has no observations table yet; `0` otherwise.
+    """
     import polars as pl
 
     from bls_stats.registry import REGISTRY
@@ -221,6 +284,11 @@ def store_query(
 
 @metadata_app.command("fetch")
 def metadata_fetch(refresh: bool = typer.Option(False)) -> None:
+    """Download and cache the CPS dimension tables (series catalog + `ln.*` mappings).
+
+    Cached under `data/cps_metadata` with an integrity manifest; `--refresh` forces a
+    re-download even if the cache looks valid. Always exits `0`.
+    """
     from pathlib import Path
 
     from bls_stats.core.http import build_client
@@ -233,6 +301,12 @@ def metadata_fetch(refresh: bool = typer.Option(False)) -> None:
 
 @metadata_app.command("export")
 def metadata_export() -> None:
+    """Push the (fetched/cached) CPS dimension tables into the store's metadata tables.
+
+    Snapshot-replaces `cps/metadata/series` and `cps/metadata/mappings/{name}` with a
+    fresh `downloaded` timestamp; these tables carry no vintage columns (ARCH §8).
+    Fetches from cache first (see `metadata fetch`). Always exits `0`.
+    """
     from pathlib import Path
 
     from bls_stats.core.http import build_client
@@ -246,7 +320,13 @@ def metadata_export() -> None:
 
 @metadata_app.command("enrich")
 def metadata_enrich(ref_date_opt: str = typer.Option(..., "--ref-date")) -> None:
-    """Full BEH §2.5 enrichment of one CPS slice — spot-check view."""
+    """Full BEH §2.5 enrichment of one CPS slice — spot-check view.
+
+    Left-joins every stored vintage's CPS observations for `--ref-date` (unfiltered by
+    `release_date` — this is a raw inspection tool, not a vintage-aware read) against the
+    series catalog and all `ln.*` mapping tables, resolving footnote codes, and prints
+    the result. Exits `1` if the `cps` observations table is empty; `0` otherwise.
+    """
     from pathlib import Path
 
     import polars as pl
@@ -266,7 +346,14 @@ def metadata_enrich(ref_date_opt: str = typer.Option(..., "--ref-date")) -> None
 
 @app.command()
 def doctor() -> None:
-    """Pre-flight probes (ARCH §8): green/red checklist; non-zero exit on any failure."""
+    """Pre-flight probes (ARCH §8): green/red checklist; non-zero exit on any failure.
+
+    Runs `storage.doctor.run_all` — store reachability, the conditional-PUT probe that
+    selects Delta commit-safety mode, delta-rs availability, BLS reachability under the
+    configured User-Agent, and presence/validity of contact-email and API-key
+    configuration — and prints one line per check. Exits `1` if any check fails, `0` if
+    every check passes.
+    """
     from bls_stats.storage.doctor import run_all
 
     settings, _ = _setup()
