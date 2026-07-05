@@ -5,6 +5,7 @@ import polars as pl
 import pytest
 
 from bls_stats.releases.calendar import (
+    CALENDAR_SCHEMA,
     apply_lapse_overlay,
     filter_published,
     find_gaps,
@@ -95,3 +96,51 @@ def test_live_calendar_build() -> None:
     cal = build(build_client(load_settings()), ["ces", "jolts"])
     assert cal.height >= 20
     assert cal.filter(pl.col("is_benchmark")).height >= 1
+
+
+def _cal(rows: list[dict]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=CALENDAR_SCHEMA)
+
+
+def test_filter_published_retains_rescheduled_then_published() -> None:  # C-25
+    oct_ref = date(2025, 10, 12)
+    sep_ref = date(2025, 9, 12)
+    cal = _cal(
+        [
+            # October: cancelled in the schedule (null) AND later published under a reschedule:
+            {
+                "program": "ces",
+                "ref_date": oct_ref,
+                "release_date": None,
+                "original_release": date(2025, 11, 7),
+                "is_benchmark": False,
+            },
+            {
+                "program": "ces",
+                "ref_date": oct_ref,
+                "release_date": date(2025, 12, 5),
+                "original_release": date(2025, 11, 7),
+                "is_benchmark": False,
+            },
+            # September: cancelled and never republished (only a null row):
+            {
+                "program": "ces",
+                "ref_date": sep_ref,
+                "release_date": None,
+                "original_release": date(2025, 10, 3),
+                "is_benchmark": False,
+            },
+            # a normal published period to anchor max_ref:
+            {
+                "program": "ces",
+                "ref_date": date(2025, 11, 12),
+                "release_date": date(2025, 12, 5),
+                "original_release": None,
+                "is_benchmark": False,
+            },
+        ]
+    )
+    kept = filter_published("ces", [(2025, 9), (2025, 10), (2025, 11)], cal)
+    assert (2025, 10) in kept  # rescheduled-then-published: retained
+    assert (2025, 9) not in kept  # cancelled and never published: still dropped
+    assert (2025, 11) in kept
