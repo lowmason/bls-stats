@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from bls_stats.releases.feeds import Release, parse_feed
+from bls_stats.releases.feeds import Release, parse_feed, poll
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "feeds"
 
@@ -58,3 +58,39 @@ def test_live_feeds_parse() -> None:
         build_client(load_settings()), ["ces", "cps", "jolts", "sae", "bed", "qcew", "oews"]
     )
     assert len(releases) >= 20  # 6 feeds × ~12 entries, minus unparseable
+
+
+_ENTRY = (
+    '<entry xmlns="http://www.w3.org/2005/Atom">'
+    "<title>Employment Situation for June</title>"
+    '<link href="https://www.bls.gov/news.release/archives/empsit_{date}.htm"/>'
+    "</entry>"
+)
+
+
+def _feed(*entries: str) -> bytes:
+    body = "".join(entries)
+    return f'<feed xmlns="http://www.w3.org/2005/Atom">{body}</feed>'.encode()
+
+
+def test_parse_feed_skips_impossible_embedded_date() -> None:  # C-2
+    good = _ENTRY.format(date="07032026")
+    bad = _ENTRY.format(date="02292023")  # Feb 29 in a non-leap year
+    out = parse_feed(_feed(bad, good), "ces")
+    assert [r.release_date.isoformat() for r in out] == ["2026-07-03"]  # bad skipped, good kept
+
+
+def test_poll_tolerates_non_xml_body(monkeypatch) -> None:  # C-2
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "empsit" in str(request.url):  # ces/cps feed serves an HTML maintenance page
+            # Deliberately not well-formed XML (undefined entity) so it triggers
+            # ElementTree.ParseError — a real maintenance page with `<html><body>down
+            # </body></html>` alone is valid XML and would not exercise this path.
+            return httpx.Response(200, text="<html><body>down &nbsp; for maintenance</body></html>")
+        return httpx.Response(200, content=_feed(_ENTRY.format(date="07022026")))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    out = poll(client, ["ces", "jolts"])  # empsit broken; jolts healthy
+    assert {r.program for r in out} == {"jolts"}  # jolts survived, no exception raised
