@@ -6,9 +6,9 @@
 > the normal specs → plans → implementation flow. Nothing here is fixed yet.
 >
 > **Verification complete (2026-07-05).** The adversarial pass the spend limit originally cut short
-> was re-run to completion. Of **40 raw findings**: **30 confirmed** (consolidated to 24 requirement
-> items C-1…C-24), **9 refuted or downgraded below threshold**, and **1 contested** (needs a human
-> call). No item is left unadjudicated.
+> was re-run to completion. Of **40 raw findings**: **31 confirmed** (consolidated to 25 requirement
+> items C-1…C-25 — the one contested item was resolved in scope on 2026-07-05 as C-25), **9 refuted
+> or downgraded below threshold**. No item is left unadjudicated.
 
 **Companion documents:** architecture spec `specs/bls-stats-architecture.md` (cited as "ARCH §N"),
 behavioral contract `bls-stats.md` (BEH), already-adjudicated deferrals `specs/deferred_items.md`
@@ -40,8 +40,8 @@ run (2026-07-05, with budget restored) adjudicated all 23 remaining findings (th
 - **6 refuted at their proposed severity but with a real, reproduced mechanism** → §3, kept as
   downgraded/sub-threshold items (not silently dropped — several are worth a cheap hardening fix).
   One of these (V14) is the reconciliation of an earlier hand-verification, in §3.2.
-- **1 contested** (a 1-uphold/1-refute split on a spec-interpretation question) → §3.1, flagged
-  for a human decision.
+- **1 contested** (a 1-uphold/1-refute split on a spec-interpretation question) → §3.1;
+  **resolved in scope on 2026-07-05 as C-25**.
 - **3 cleanly refuted** → §4.
 
 Where the second pass disagreed with my own earlier hand-verification, I reconciled it in §3.2
@@ -594,18 +594,45 @@ re-raised if assumptions change. Severity shown is the corrected one.
   Residual: a redundant fetch attempt for a not-yet-present period. Low priority; add a future-dated
   fixture when touched.
 
-### 3.1 Contested — needs a human decision
+### 3.1 Contested — RESOLVED (2026-07-05): in scope, promoted to C-25
 
-- **V15 — pinned cancel-drop rule permanently omits periods republished under a later release**
-  (`releases/calendar.py:331`, cites CES October 2025). The verifiers split (1 refute / 1 uphold /
-  1 stalled). The **refute** argues the drop is exactly what ARCH §5.4 mandates (`filter_published`
-  pins to the latest published `ref_date` and drops explicitly-cancelled/null-`release_date`
-  periods) — a design decision, not a defect. The **uphold** argues it is a real defect for a store
-  first seeded **after** a government shutdown: a period cancelled in the schedule but later
-  published under a rescheduled release gets permanently omitted from backfill. Both readings are
-  defensible; this is a genuine spec-interpretation question. **Decision needed:** is the
-  post-shutdown-seeding case in scope? If yes, the lapse overlay must distinguish "cancelled and
-  never published" from "rescheduled and later published" when computing the drop set.
+- **V15 → C-25 (Important) — pinned cancel-drop rule permanently omits periods republished under a
+  later release** (`releases/calendar.py:331`, cites CES October 2025). The verifiers split (1
+  refute / 1 uphold / 1 stalled): the refute called the drop ARCH §5.4-mandated; the uphold called
+  it a real defect for a store first seeded **after** a government shutdown, where a period
+  cancelled in the schedule but later published under a rescheduled release is permanently omitted
+  from backfill. **Decision (human, 2026-07-05): the post-shutdown-seeding case IS in scope.** The
+  lapse overlay / `filter_published` must distinguish "cancelled and never published" (stays
+  dropped) from "rescheduled and later published" (must be retained). Treated as a confirmed
+  Important defect — see **C-25** below.
+
+### C-25 (Important) — rescheduled-and-later-published periods must not be dropped by the cancel rule
+
+**Where:** `src/bls_stats/releases/calendar.py:331` (`filter_published` cancel-drop set) and the
+lapse overlay `apply_lapse_overlay` (~calendar.py:202-211). Promoted from contested V15 by human
+decision.
+
+**What:** `filter_published` drops periods whose `release_date` is null (cancelled). When a release
+is cancelled in the schedule but subsequently republished under a *rescheduled* later release, the
+overlay/pin currently leaves it dropped — so a store first seeded after the shutdown never backfills
+that period, even though BLS did publish it. The drop set must exclude periods that were ultimately
+published under a rescheduled `release_date`.
+
+**Failure scenario:** a government shutdown cancels the CES October 2025 release in the schedule;
+BLS later publishes October 2025 under a rescheduled date. A store seeded in 2026 runs
+`backfill --program ces` over a range including 2025/10; `filter_published` drops 2025/10 as
+cancelled, so it is never fetched — a permanent, silent hole for that vintage.
+
+**Remediation:** in the lapse overlay, when a rescheduled release supplies a non-null
+`release_date` for a period that a prior schedule row cancelled, retain the period (keyed on
+`original_release` → rescheduled `release_date`) rather than treating it as cancelled. Equivalently,
+compute the cancel-drop set in `filter_published` from periods that have *no* published
+`release_date` in *any* calendar row (cancelled and never republished), not merely a null in the
+row being examined.
+
+**Acceptance:** a calendar fixture with a cancelled-then-rescheduled period asserts
+`filter_published` **retains** that period, while a cancelled-and-never-published period is still
+dropped; a companion test asserts the backfill period set includes the republished period.
 
 ### 3.2 Reconciliation of my earlier hand-verifications vs the verified pass
 
@@ -655,9 +682,9 @@ re-raised if assumptions change. Severity shown is the corrected one.
 5. **C-15, C-16** — freshness-guard host allowlist and the skipped first-increment row band.
 6. **C-5** — settle the backfill-validation docs/contract (subsumes V4).
 7. **C-17, C-18, C-19** — prefix-scoped doctor probe, OEWS string-lock, QCEW memory.
-8. **C-20 / C-21 / C-22 / C-23** — the test-coverage gaps (backfill, mixed-ingest, `gaps`, log-level).
-9. Confirmed doc/polish minors (C-7…C-12, C-24) and the §3 sub-threshold hardening items.
-10. **Decide V15** (§3.1) — the one open spec-interpretation question.
+8. **C-25** — cancelled-then-rescheduled periods dropped from backfill (resolved in scope).
+9. **C-20 / C-21 / C-22 / C-23** — the test-coverage gaps (backfill, mixed-ingest, `gaps`, log-level).
+10. Confirmed doc/polish minors (C-7…C-12, C-24) and the §3 sub-threshold hardening items.
 
 **Provenance:** first review run `wf_349cd0e4-437` (finders + partial verify); completion run
 `wf_2f1d5888-6ea` (23 findings × 3 lenses, 2 verifier stalls that still reached quorum). Both
