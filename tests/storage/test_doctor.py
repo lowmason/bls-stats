@@ -6,11 +6,11 @@ from bls_stats.core.config import Settings
 from bls_stats.storage.doctor import check_conditional_put, check_deltalake, check_env
 
 
-def test_check_env_flags_default_email_and_local_store() -> None:
-    results = {r.name: r for r in check_env(Settings())}
-    assert results["contact_email"].ok is False  # default email → warn
-    assert results["store_uri"].ok is False  # local path → warn (ARCH §10)
-    assert results["api_key"].ok is False
+def test_check_env_warns_not_fails_on_optional() -> None:  # C-6
+    results = {c.name: c for c in check_env(Settings())}  # all defaults
+    assert results["api_key"].ok is True and results["api_key"].warn is True
+    assert results["store_uri"].ok is True and results["store_uri"].warn is True
+    assert results["contact_email"].ok is True and results["contact_email"].warn is True
 
 
 def test_check_env_passes_with_real_config() -> None:

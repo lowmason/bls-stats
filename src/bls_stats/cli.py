@@ -380,6 +380,6 @@ def doctor() -> None:
     settings, _ = _setup()
     results = run_all(settings)
     for r in results:
-        mark = "✓" if r.ok else "✗"
+        mark = "!" if r.warn else ("✓" if r.ok else "✗")
         typer.echo(f"{mark} {r.name}: {r.detail}")
     raise typer.Exit(0 if all(r.ok for r in results) else 1)

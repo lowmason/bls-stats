@@ -126,3 +126,19 @@ def test_programs_matches_registry() -> None:  # C-9
     from bls_stats.registry import REGISTRY
 
     assert PROGRAMS == list(REGISTRY)
+
+
+def test_doctor_exits_zero_on_warnings_only(monkeypatch, tmp_path) -> None:  # C-6
+    from bls_stats.storage.doctor import CheckResult
+
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))  # local: warn, not fail
+    monkeypatch.setattr(
+        "bls_stats.storage.doctor.check_conditional_put",
+        lambda s: CheckResult("conditional_put", True, "skipped: local store"),
+    )
+    monkeypatch.setattr(
+        "bls_stats.storage.doctor.check_bls",
+        lambda s: CheckResult("bls", True, "HTTP 200"),
+    )
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0  # only warnings, no hard failures
