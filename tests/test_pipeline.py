@@ -345,3 +345,113 @@ def test_oews_multiyear_backfill_fetches_all_years(store, monkeypatch) -> None: 
     slots = [Slot(date(y, 5, 12), None, None, "backfill") for y in (2020, 2021, 2022)]
     df = _fetch_event(None, "oews", slots, __import__("pathlib").Path("/tmp"), NOW)
     assert sorted(df["ref_date"].dt.year().unique().to_list()) == [2020, 2021, 2022]
+
+
+def _backfill_cal(store):
+    """A minimal release_calendar so filter_published passes for jolts."""
+    from bls_stats.releases.calendar import CALENDAR_SCHEMA
+
+    store.append_state(
+        "release_calendar",
+        pl.DataFrame(
+            [
+                {
+                    "program": "jolts",
+                    "ref_date": date(2026, 1, 30),
+                    "release_date": date(2026, 3, 1),
+                    "original_release": None,
+                    "is_benchmark": False,
+                },
+            ],
+            schema=CALENDAR_SCHEMA,
+        ),
+    )
+
+
+def test_backfill_success_then_idempotent(store) -> None:  # C-20
+    _backfill_cal(store)
+    code = run_backfill(
+        Settings(),
+        store,
+        "jolts",
+        "2026/01",
+        "2026/01",
+        clock=CLOCK,
+        fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+    )
+    assert code == 0
+    first = store.scan_observations("jolts").collect().height
+    assert first > 0
+    run_backfill(
+        Settings(),
+        store,
+        "jolts",
+        "2026/01",
+        "2026/01",
+        clock=CLOCK,
+        fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+    )
+    assert store.scan_observations("jolts").collect().height == first  # no duplicates
+
+
+def test_backfill_crash_repairs(store, monkeypatch) -> None:  # C-20
+    _backfill_cal(store)
+    calls = {"n": 0}
+    original = Ledger.record
+
+    def crashing(self, records):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("crash after commit")
+        return original(self, records)
+
+    monkeypatch.setattr(Ledger, "record", crashing)
+    assert (
+        run_backfill(
+            Settings(),
+            store,
+            "jolts",
+            "2026/01",
+            "2026/01",
+            clock=CLOCK,
+            fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+        )
+        == 2
+    )
+    height = store.scan_observations("jolts").collect().height
+    monkeypatch.undo()
+    assert (
+        run_backfill(
+            Settings(),
+            store,
+            "jolts",
+            "2026/01",
+            "2026/01",
+            clock=lambda: NOW,
+            fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+        )
+        == 0
+    )
+    assert store.scan_observations("jolts").collect().height == height  # repaired, not doubled
+
+
+def test_mixed_ingest_exit_one_and_isolates(store) -> None:  # C-21
+    ok_release = Release("ces", date(2026, 7, 2), 2026, 6, False)
+    bad_release = Release("jolts", date(2026, 7, 2), 2026, 5, False)
+
+    def fetch(client, program, slots, dest_dir, downloaded):
+        if program == "jolts":
+            raise RuntimeError("jolts download failed")
+        return fake_fetch()(client, program, slots, dest_dir, downloaded)
+
+    code = run_ingest(
+        Settings(),
+        store,
+        programs=["ces", "jolts"],
+        clock=CLOCK,
+        poll_fn=lambda client, programs: [ok_release, bad_release],
+        fetch_fn=fetch,
+        fresh_fn=lambda client, program, rd: True,
+    )
+    assert code == 1  # one failed, one succeeded
+    assert store.scan_observations("ces").collect().height > 0  # ces isolated from jolts failure
