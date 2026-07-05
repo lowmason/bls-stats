@@ -155,6 +155,25 @@ class VintageStore:
             f"{self.uri}/state/{table}", mode="append", storage_options=self.storage_options
         )
 
+    def replace_table(self, relative_path: str, df: pl.DataFrame) -> None:
+        """Snapshot-replace a non-observations table under the store (overwrite semantics).
+
+        Used for dimension/metadata tables that carry no vintage columns and no history
+        (ARCH §4.2, §8) — each call fully replaces the prior snapshot rather than appending.
+        `schema_mode="overwrite"` lets the replacement's schema change (e.g. a metadata table
+        gaining/losing a column) without the write failing on a schema mismatch.
+
+        Args:
+            relative_path: Table path relative to `self.uri`, e.g. `"cps/metadata/series"`.
+            df: Full replacement contents for the table.
+        """
+        df.write_delta(
+            f"{self.uri}/{relative_path}",
+            mode="overwrite",
+            storage_options=self.storage_options,
+            delta_write_options={"schema_mode": "overwrite"},
+        )
+
     def read_state(self, table: str) -> pl.DataFrame | None:
         """Read a full state table, or `None` if it has never been written.
 
