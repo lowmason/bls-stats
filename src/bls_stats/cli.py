@@ -114,12 +114,12 @@ def backfill(
 
 @calendar_app.command("build")
 def calendar_build() -> None:
-    """Full archive+schedule scrape with lapse overlay (ARCH §5.4).
+    """Scrape and append a full archive+schedule calendar with lapse overlay (ARCH §5.4).
 
-    Rebuilds the `release_calendar` state table from scratch for every program except
-    `ep` (which has no archive/schedule pages — ARCH §5.2). Run once to bootstrap before
-    the first `backfill`, and thereafter only to pick up structural changes; `calendar
-    refresh` is the cheap day-to-day update. Always exits `0`.
+    Appends the freshly scraped rows to the `release_calendar` state table (it does not
+    replace it — downstream reads dedupe on `(program, ref_date, release_date)`). Run once to
+    bootstrap before the first `backfill`; `calendar refresh` is the cheap day-to-day update.
+    Always exits `0`.
     """
     from bls_stats.core.http import build_client
     from bls_stats.releases.calendar import build

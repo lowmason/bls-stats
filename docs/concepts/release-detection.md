@@ -41,8 +41,10 @@ set of **slots** — `(ref_date, revision, benchmark)` prints — it carries:
   benchmark window is re-published at its terminal revision with the benchmark counter
   incremented past the prior maximum for that period.
 - **QCEW year-to-date**: a QCEW release for quarter *q* carries all quarters of the year so far,
-  each at terminal revision `4 − q` — first quarter data is revised each of the four times it is
-  re-published within its year.
+  each at revision `(q − carried quarter)` — the Q3 release carries Q3 at revision 0, Q2 at
+  revision 1, Q1 at revision 2. A quarter reaches its terminal revision `4 − q` only at the
+  year's Q4 release; `4 − q` is also the revision used for prior-year quarters re-published in a
+  benchmark window.
 
 Slots already recorded as `ingested` or `missed` are filtered out before fetching, which is what
 makes re-runs idempotent.
