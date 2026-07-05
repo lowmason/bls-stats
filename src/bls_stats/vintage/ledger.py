@@ -159,30 +159,36 @@ class Ledger:
         )
         return hit["status"][0] if hit.height else None
 
-    def prior_benchmark_count(self, program: str, ref_date: date | None) -> int:
+    def prior_benchmark_count(
+        self, program: str, ref_date: date | None, before_release: date | None = None
+    ) -> int:
         """Highest benchmark counter successfully ingested so far for a (program, ref_date).
 
         The pipeline passes this as the prior-count callback into `expand()`, which uses it to
         assign the next benchmark counter to a new benchmark event. Only `status == "ingested"`
         rows count — a `deferred` benchmark slot has not actually landed data yet, so it must
-        not advance the counter (ARCH §5.3: deferred events retry until superseded or missed).
+        not advance the counter (ARCH §5.3).
+
+        When `before_release` is given, only rows with `release_date < before_release` count.
+        The pipeline passes the release being processed, so the counter is derived from prints
+        at strictly-earlier release dates — a re-poll of the same benchmark release therefore
+        recomputes the same counter and its slots resolve as already-ingested (idempotent,
+        ARCH §4.3/§7.2), instead of climbing 1→2→3 and re-appending the window every run.
 
         Args:
             program: Program key.
-            ref_date: Canonical period date; matched null-safely (relevant for programs whose
-                registry allows a null `ref_date`).
+            ref_date: Canonical period date; matched null-safely.
+            before_release: If given, exclude rows whose `release_date` is not strictly earlier.
 
         Returns:
-            The maximum `benchmark` value among ingested rows for this (program, ref_date), or
-            `0` if none have ever been ingested.
+            The maximum `benchmark` among qualifying ingested rows, or `0` if none.
         """
-        got = (
-            self.resolved()
-            .filter(
-                (pl.col("program") == program)
-                & pl.col("ref_date").eq_missing(pl.lit(ref_date))
-                & (pl.col("status") == "ingested")
-            )["benchmark"]
-            .max()
+        rows = self.resolved().filter(
+            (pl.col("program") == program)
+            & pl.col("ref_date").eq_missing(pl.lit(ref_date))
+            & (pl.col("status") == "ingested")
         )
+        if before_release is not None:
+            rows = rows.filter(pl.col("release_date") < before_release)
+        got = rows["benchmark"].max()
         return int(got) if got is not None else 0

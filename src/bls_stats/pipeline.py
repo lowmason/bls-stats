@@ -296,7 +296,9 @@ def run_ingest(
             s
             for s in expand(
                 release,
-                lambda rd, program=release.program: ledger.prior_benchmark_count(program, rd),
+                lambda rd, program=release.program, before=release.release_date: (
+                    ledger.prior_benchmark_count(program, rd, before_release=before)
+                ),
             )
             if ledger.slot_status(
                 release.program, s.ref_date, release.release_date, s.revision, s.benchmark

@@ -75,6 +75,29 @@ def test_rerun_is_noop(store) -> None:
     assert store.scan_observations("ces").collect().height == 9  # no duplicates
 
 
+def test_benchmark_release_rerun_is_noop(store) -> None:  # C-13
+    """Re-polling the same benchmark release must not re-append its window (ARCH §4.3/§7.2)."""
+    from datetime import timedelta
+
+    bench = Release("ces", date(2027, 2, 5), 2027, 1, True)  # CES Feb benchmark, Jan-2027 data
+    run1 = datetime(2027, 2, 6, 13, 0, tzinfo=UTC)
+    run2 = run1 + timedelta(days=1)  # next daily cron; benchmark still in the feed
+    common = dict(
+        programs=["ces"],
+        poll_fn=lambda client, programs: [bench],
+        fetch_fn=fake_fetch(),
+        fresh_fn=lambda client, program, rd: True,
+    )
+    run_ingest(Settings(), store, clock=lambda: run1, **common)
+    after_run1 = store.scan_observations("ces").collect().height
+    run_ingest(Settings(), store, clock=lambda: run2, **common)  # re-poll same release
+    obs = store.scan_observations("ces").collect()
+    assert obs.height == after_run1  # no duplicate window rows
+    key = ["series_id", "ref_date", "release_date"]
+    assert obs.unique(subset=key).height == obs.height  # candidate key still unique
+    assert obs.filter(pl.col("benchmark") == 2).height == 0  # no fabricated benchmark=2
+
+
 def test_crash_between_commit_and_record_repairs(store, monkeypatch) -> None:
     calls = {"n": 0}
     original = Ledger.record
