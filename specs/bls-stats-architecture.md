@@ -567,4 +567,7 @@ Loaded from the environment via python-dotenv (**`.project.env`**, explicit name
 6. **EP store wiring:** §5.2 documents `ingest --program ep` committing scrape-date vintages,
    but the EP wide frame (no `series_id`/`value` columns) does not fit the vintage schema —
    needs a decision (melt to long format vs a dedicated table). The pipeline currently guards
-   this path with an explicit error and exit 2 instead of a silent no-op.
+   this path with an explicit error and exit 2 instead of a silent no-op. Decision (2026-07-05):
+   when wired, melt the wide matrix to long format — `series_id` composed from
+   occupation/industry/measure, `value` Float64 — so EP shares the observations table and the
+   canonical reads.
