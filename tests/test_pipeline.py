@@ -159,6 +159,36 @@ def test_backdated_release_denied_not_fabricated(store) -> None:  # C-14
     assert older_rows.height > 0 and (older_rows["status"] == "missed").all()
 
 
+def test_backdated_repoll_does_not_downgrade_ingested(store) -> None:  # C-14 fix (Important #1)
+    """A back-dated re-poll must not flip an already-ingested slot to missed (ARCH §5.3)."""
+    june = Release("ces", date(2026, 7, 2), 2026, 6, False)   # June data, published Jul 2
+    july = Release("ces", date(2026, 8, 6), 2026, 7, False)   # July data, published Aug 6 (newer)
+    _ingest(store, poll_fn=lambda client, programs: [june], clock=CLOCK)  # run 1: June ingests
+    # run 2: rolling feed rolls forward, June re-appears alongside newer July
+    _ingest(store, poll_fn=lambda client, programs: [june, july], clock=LATER_CLOCK)
+    led = Ledger(store).resolved()
+    june_rows = led.filter(pl.col("release_date") == date(2026, 7, 2))
+    assert june_rows.height > 0 and (june_rows["status"] == "ingested").all()  # NOT downgraded
+    obs = store.scan_observations("ces").collect()
+    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height > 0     # June obs intact
+    assert obs.filter(pl.col("release_date") == date(2026, 8, 6)).height > 0     # July committed
+
+
+def test_backdated_via_ledger_branch_recorded_missed(store) -> None:  # C-14 coverage (Important #2)
+    """The 'already-ingested in ledger' back-dated branch: a lone older re-poll denied + missed."""
+    june = Release("ces", date(2026, 7, 2), 2026, 6, False)
+    july = Release("ces", date(2026, 8, 6), 2026, 7, False)
+    _ingest(store, poll_fn=lambda client, programs: [july], clock=CLOCK)  # run 1: July ingests
+    # run 2: lone older re-poll (June only), already back-dated by the ingested July in the ledger
+    _ingest(store, poll_fn=lambda client, programs: [june], clock=LATER_CLOCK)
+    obs = store.scan_observations("ces").collect()
+    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height == 0  # June not fabricated
+    led = Ledger(store).resolved()
+    june_rows = led.filter(pl.col("release_date") == date(2026, 7, 2))
+    assert june_rows.height > 0 and (june_rows["status"] == "missed").all()      # recorded missed
+    assert (led.filter(pl.col("release_date") == date(2026, 8, 6))["status"] == "ingested").all()
+
+
 def test_empty_slice_defers(store) -> None:
     assert _ingest(store, fetch_fn=fake_fetch(refs=[])) == 0
     assert (Ledger(store).resolved()["status"] == "deferred").all()

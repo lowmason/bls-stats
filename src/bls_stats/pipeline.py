@@ -313,22 +313,33 @@ def run_ingest(
 
     for release in releases:
         if _is_backdated(release):
-            missed_slots = expand(
-                release,
-                lambda rd, program=release.program, before=release.release_date: (
-                    ledger.prior_benchmark_count(program, rd, before_release=before)
-                ),
-            )
-            if not dry_run:
+            # Record only not-yet-resolved slots as missed. Never downgrade an already-
+            # ingested slot: a correct live-vintage print stays ingested forever (ARCH §5.3,
+            # _expire_superseded only expires deferred slots), and re-polling a back-dated
+            # release must be idempotent — the same guard the live branch below uses.
+            missed_slots = [
+                s
+                for s in expand(
+                    release,
+                    lambda rd, program=release.program, before=release.release_date: (
+                        ledger.prior_benchmark_count(program, rd, before_release=before)
+                    ),
+                )
+                if ledger.slot_status(
+                    release.program, s.ref_date, release.release_date, s.revision, s.benchmark
+                )
+                not in ("ingested", "missed")
+            ]
+            if missed_slots and not dry_run:
                 ledger.record([
                     SlotRecord(release.program, s.ref_date, release.release_date,
                                s.revision, s.benchmark, "increment", 0, "missed", clock())
                     for s in missed_slots
                 ])
             log.warning(
-                "%s release %s is back-dated (a newer release exists) — recorded missed, "
-                "not fetched; use `backfill` for history (C-14)",
-                release.program, release.release_date,
+                "%s release %s is back-dated (a newer release exists) — not fetched; "
+                "recorded %d new slot(s) missed, use `backfill` for history (C-14)",
+                release.program, release.release_date, len(missed_slots),
             )
             continue
         slots = [
