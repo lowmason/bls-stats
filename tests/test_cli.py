@@ -49,3 +49,66 @@ def test_bad_log_level_falls_back_to_info(monkeypatch, tmp_path) -> None:
     logging.getLogger().handlers.clear()
     settings, _ = _setup()  # must not raise (falls back to INFO)
     assert settings.log_level == "verbose"
+
+
+def _seed_store_for_gaps(tmp_path):
+    """A store whose calendar expects a CES release that the ledger never recorded."""
+    from datetime import UTC, date, datetime
+
+    import polars as pl
+
+    from bls_stats.releases.calendar import CALENDAR_SCHEMA
+    from bls_stats.storage.delta import VintageStore
+    from bls_stats.vintage.ledger import Ledger, SlotRecord
+
+    store = VintageStore(str(tmp_path / "store"))
+    store.append_state(
+        "release_calendar",
+        pl.DataFrame(
+            [
+                {
+                    "program": "ces",
+                    "ref_date": date(2026, 3, 12),
+                    "release_date": date(2026, 4, 3),
+                    "original_release": None,
+                    "is_benchmark": False,
+                },
+            ],
+            schema=CALENDAR_SCHEMA,
+        ),
+    )
+    # jolts has a missed slot; ces has no ledger row at all.
+    Ledger(store).record(
+        [
+            SlotRecord(
+                "jolts",
+                date(2026, 3, 31),
+                date(2026, 5, 6),
+                0,
+                0,
+                "increment",
+                0,
+                "missed",
+                datetime(2026, 5, 6, tzinfo=UTC),
+            ),
+        ]
+    )
+    return store
+
+
+def test_gaps_flags_expected_release_missing_from_ledger(monkeypatch, tmp_path) -> None:  # C-1
+    _seed_store_for_gaps(tmp_path)
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    result = runner.invoke(app, ["gaps", "--program", "ces"])
+    assert result.exit_code == 1  # the expected CES release has no ledger row
+    assert "unexplained: 1" in result.output
+
+
+def test_gaps_program_scopes_strict_missed(monkeypatch, tmp_path) -> None:  # C-1
+    _seed_store_for_gaps(tmp_path)
+    monkeypatch.setenv("BLS_STORE_URI", str(tmp_path / "store"))
+    # jolts has no calendar row, so no unexplained gap; its missed slot is acknowledged and,
+    # under --strict, fails — but that is jolts' own slot, not leaked from ces:
+    result = runner.invoke(app, ["gaps", "--program", "jolts", "--strict"])
+    assert result.exit_code == 1
+    assert "acknowledged: 1" in result.output

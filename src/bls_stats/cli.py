@@ -164,22 +164,22 @@ def calendar_show(program: str = typer.Option(...)) -> None:
 def gaps(
     program: str | None = typer.Option(None),
     strict: bool = typer.Option(False, "--strict", help="missed prints also exit non-zero"),
+    as_of_date: str | None = typer.Option(
+        None, "--as-of-date", help="audit expected releases published on/before this YYYY-MM-DD"
+    ),
 ) -> None:
-    """Unexplained gaps exit non-zero; recorded missed/deferred are acknowledged (ARCH §8).
+    """Audit expected releases (from the calendar) against the ledger (ARCH §5.3, §8).
 
-    Diffs the release calendar's expected `(program, ref_date)` pairs against the ledger.
-    A gap with no ledger row at all (of any status) is "unexplained" — the calendar
-    expected a release and nothing was ever recorded for it. A gap with a `missed` or
-    `deferred` ledger row is "acknowledged": printed for visibility but not treated as a
-    failure, so one historical outage doesn't alarm on every subsequent run.
-
-    Exits `1` if any unexplained gap exists, or if `--strict` is set and any acknowledged
-    gap has status `missed` (for one-off audits that want permanent gaps to fail too);
-    `1` also if the release calendar hasn't been built yet. Exits `0` otherwise.
+    A calendar row with a non-null `release_date` at or before the reference date is an
+    *expected* release. If the ledger has no row for its `(program, ref_date)` (of any status),
+    it is *unexplained* — a release the pipeline never recorded. Recorded `missed`/`deferred`
+    slots are *acknowledged*: printed but not failing, unless `--strict` (which also fails on
+    `missed`). The reference date defaults to the latest published `release_date` in the
+    calendar; `--as-of-date` overrides it. Exits `1` on any unexplained gap, on a `--strict`
+    missed slot, or if the calendar is unbuilt; `0` otherwise.
     """
     import polars as pl
 
-    from bls_stats.releases.calendar import find_gaps
     from bls_stats.vintage.ledger import Ledger
 
     _, store = _setup()
@@ -187,17 +187,27 @@ def gaps(
     if cal is None:
         typer.echo("no calendar — run `bls-stats calendar build`", err=True)
         raise typer.Exit(1)
+    ledger = Ledger(store).resolved()
     if program:
         cal = cal.filter(pl.col("program") == program)
-    calendar_gaps = find_gaps(cal)
-    ledger = Ledger(store).resolved()
-    acknowledged = ledger.filter(pl.col("status").is_in(["missed", "deferred"]))
-    unexplained = calendar_gaps.join(
-        ledger.select("program", "ref_date").unique(), on=["program", "ref_date"], how="anti"
+        ledger = ledger.filter(pl.col("program") == program)
+    published = cal.filter(pl.col("release_date").is_not_null())
+    ref = (
+        date.fromisoformat(as_of_date)
+        if as_of_date
+        else (published["release_date"].max() if published.height else None)
     )
+    expected = (
+        published.filter(pl.col("release_date") <= ref).select("program", "ref_date").unique()
+        if ref is not None
+        else published.select("program", "ref_date").unique()
+    )
+    recorded = ledger.select("program", "ref_date").unique()
+    unexplained = expected.join(recorded, on=["program", "ref_date"], how="anti")
+    acknowledged = ledger.filter(pl.col("status").is_in(["missed", "deferred"]))
     typer.echo(f"unexplained: {unexplained.height}  acknowledged: {acknowledged.height}")
     if unexplained.height:
-        typer.echo(str(unexplained))
+        typer.echo(str(unexplained.sort("program", "ref_date")))
     missed = acknowledged.filter(pl.col("status") == "missed")
     raise typer.Exit(1 if (unexplained.height or (strict and missed.height)) else 0)
 

@@ -273,6 +273,10 @@ def find_gaps(cal: pl.DataFrame) -> pl.DataFrame:
     any that has no calendar row at all — a scrape/coverage gap, distinct from a release the
     calendar explicitly marks cancelled (null `release_date`, still present as a row).
 
+    This is a distinct scrape-coverage check and is no longer wired into the `gaps` CLI
+    command, which now audits expected-vs-ledger (calendar-expected releases vs. what the
+    pipeline actually recorded).
+
     Args:
         cal: A calendar frame (`CALENDAR_SCHEMA`), e.g. from `build`.
 
