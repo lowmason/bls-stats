@@ -519,8 +519,8 @@ def run_backfill(
             to backfill (it is snapshot/cycle-based, not periodic).
         start: Range start as `YYYY/MM`, `YYYY/Q`, or `YYYY`, per the program's frequency.
         end: Range end, same format as `start`.
-        dry_run: If `True`, fetch and validate but skip both the Delta append and the
-            ledger write.
+        dry_run: If `True`, fetch and stamp but skip both the Delta append and the ledger
+            write (backfill does not run the ingest validation gates — ARCH §7.3).
         clock: Injected wall clock for `downloaded`/`ingested_at` and the snapshot date
             itself; defaults to `datetime.now(UTC)`.
         fetch_fn (Callable | None): Injected replacement for the fetch dispatch (default
