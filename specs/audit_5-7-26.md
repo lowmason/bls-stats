@@ -4,6 +4,11 @@
 > whole-codebase adversarial review. Confirmed findings are written as actionable requirements
 > (location, failure scenario, remediation, acceptance criteria) so this can feed a plan through
 > the normal specs → plans → implementation flow. Nothing here is fixed yet.
+>
+> **Verification complete (2026-07-05).** The adversarial pass the spend limit originally cut short
+> was re-run to completion. Of **40 raw findings**: **30 confirmed** (consolidated to 24 requirement
+> items C-1…C-24), **9 refuted or downgraded below threshold**, and **1 contested** (needs a human
+> call). No item is left unadjudicated.
 
 **Companion documents:** architecture spec `specs/bls-stats-architecture.md` (cited as "ARCH §N"),
 behavioral contract `bls-stats.md` (BEH), already-adjudicated deferrals `specs/deferred_items.md`
@@ -22,22 +27,26 @@ failure path real in the code as written), **spec-alignment** (is the "correct" 
 what ARCH/BEH mandate), and **materiality** (does an existing backstop intercept it). A finding
 needed **≥2 of 3 upheld votes** to survive.
 
-### 1.1 Verification was truncated — read this before acting
+### 1.1 Two-pass history (why the numbering has two series)
 
-The account hit its spend limit **partway through the verification phase**. The dimension finders
-all completed, but a large batch of verifier agents died mid-flight with budget errors. Because a
-finding is only "confirmed" once it collects ≥2 upheld votes, **findings whose verifiers all died
-were pushed into the refuted/inconclusive bucket regardless of merit.** Concretely:
+The first run's verification phase was cut off by the account spend limit: 17 findings cleared
+with ≥2 votes (§2, IDs **C-1…C-12** after consolidating cross-dimension duplicates), 1 was
+genuinely refuted, and 22 were starved of a verdict when their verifiers died. A second, verified
+run (2026-07-05, with budget restored) adjudicated all 23 remaining findings (the 22 starved + the
+1 refute, re-checked). That second pass produced:
 
-- **17 findings** cleared verification with 2–3 upheld votes → **§2 Confirmed**.
-- **1 finding** was genuinely refuted by surviving verifiers → **§4 Refuted**.
-- **22 findings** never received a completed verdict — their verifiers all errored out. These are
-  **not refuted**; they are **unadjudicated** → **§3 Pending verification**. Several are
-  high-severity. I hand-verified the two criticals and two of the importants directly against the
-  code (results noted inline); the rest still need the adversarial pass that the budget cut short.
+- **13 newly confirmed** (≥2/3 votes) → promoted into §2b, consolidated into **C-13…C-24** (the
+  feed-date-parse finding, V17, folds into C-2), including both criticals.
+- **6 refuted at their proposed severity but with a real, reproduced mechanism** → §3, kept as
+  downgraded/sub-threshold items (not silently dropped — several are worth a cheap hardening fix).
+  One of these (V14) is the reconciliation of an earlier hand-verification, in §3.2.
+- **1 contested** (a 1-uphold/1-refute split on a spec-interpretation question) → §3.1, flagged
+  for a human decision.
+- **3 cleanly refuted** → §4.
 
-**Do not treat §3 as dismissed.** When budget resets, the remaining verification should be
-completed (§5 has the mechanism).
+Where the second pass disagreed with my own earlier hand-verification, I reconciled it in §3.2
+rather than silently trusting either — the agents corrected one of my calls (V14). (13 + 6 + 1 + 3
+= the 23 re-checked findings.)
 
 ### 1.2 Severity scale
 
@@ -319,154 +328,338 @@ minimal correct step; implementing the checks is the stronger option, coordinate
 
 ---
 
-## 3. Pending verification (finders flagged; adversarial pass did not complete)
+## 2b. Confirmed in the second pass (C-13…C-24)
 
-**These are not refuted.** Their verifier agents all errored out on the budget limit before
-returning a verdict, so they carry the finder's proposed severity but no independent confirmation.
-Four are hand-verified below (marked ✔ hand-verified); the rest need the §5 completion pass.
-Severities are the finder's own until verified.
+These cleared the completed verification (≥2/3 votes). The two criticals are the most important
+output of the entire review.
 
-### Critical (unverified) — verify these first
+### C-13 (Critical) — re-polled benchmark release re-appends its whole window with a fabricated, climbing `benchmark` counter
 
-- **P-1 ✔ hand-verified — Re-polled benchmark release re-appends its whole window with
-  `benchmark+1` every run.** `pipeline.py:299` → `profiles.py:120` → `ledger.py:162`. The
-  benchmark counter for a window slot is `prior_benchmark_count(...) + 1`, computed from
-  already-**ingested** rows; the idempotency guard `slot_status` keys on that same `benchmark`
-  value. So when a benchmark release is re-polled — which happens for ~a year, since feeds list
-  the last ~12 entries — run 1 ingests the window at `benchmark=1`, run 2 reads prior=1 and
-  assigns `benchmark=2` (guard finds no match → re-appends), run 3 assigns 3, and so on. The
-  entire benchmark window is duplicated once per run with a fabricated, monotonically-climbing
-  counter until the release scrolls out of the feed. `latest()` still returns sane values (highest
-  benchmark, stable data), which is why it hides, but the store accumulates hundreds of duplicate
-  window copies and the vintage history records benchmark counters 2,3,4… that never occurred.
-  **I confirmed this mechanically against the code.** The replay integration test polls each
-  release exactly once, so it cannot catch it.
-  *Likely remediation:* make the window-slot idempotency independent of the counter — e.g. key the
-  "already done" check on `(program, ref_date, release_date, kind)` rather than the derived
-  `benchmark`, or have `prior_benchmark_count` exclude rows from the current `release_date`, or
-  compute the next benchmark once per release and short-circuit if the release already produced any
-  ingested window row. Needs a design decision + a re-poll regression test.
+**Where:** `src/bls_stats/pipeline.py:299` (the `prior_benchmark` callback) →
+`src/bls_stats/releases/profiles.py:120` (`benchmark = prior_benchmark(rd) + 1`) →
+`src/bls_stats/vintage/ledger.py:162-188` (`prior_benchmark_count`). Verified 3/3; independently
+reproduced offline by a verifier (run 1 committed the window at `benchmark=1`; re-running the same
+benchmark release added the whole window again at `benchmark=2`, 58 duplicate rows on the
+candidate key).
 
-- **P-2 — Older polled releases fetch the *current* flat file and stamp it as a historical print.**
-  `pipeline.py:294`. On bootstrap-via-`ingest` or outage catch-up, `poll` returns multiple
-  releases; for each not-yet-ingested older release, `_fetch_event` downloads the current LABSTAT
-  file (always latest state) and stamps it with the old `release_date` + expanded
-  revision/benchmark — fabricating a vintage that claims an old release date but carries revised
-  values, the exact clairvoyance the vintage model exists to prevent. *Hand-read confirms the code
-  path exists* (the freshness guard passes because the current file's `Last-Modified` is recent);
-  materiality hinges on whether `ingest` is expected to do catch-up at all (the intended tool is
-  `backfill`). Needs adjudication: either guard `ingest` against back-dated releases (fetch the
-  current file only for the newest release; defer/deny older ones), or document that `ingest` must
-  not be used for catch-up and gate on it.
+**What:** a benchmark window slot's counter is `prior_benchmark_count(...) + 1`, computed from
+already-**ingested** rows for that `(program, ref_date)` with **no `release_date` filter** — so it
+counts the rows this same release ingested on the previous run. Both idempotency guards key on that
+counter: the run-level anti-join `slot_status(..., benchmark)` (pipeline.py:301-304) and the
+commit-level `slot_exists(..., benchmark)` (pipeline.py:404-405). When the recomputed counter
+climbs (1 → 2 → 3…), neither guard finds a match, so the entire window is re-appended every run.
+BLS feeds retain ~12 entries (~a year for monthly programs, ARCH §5.2), and the ledger anti-join is
+the only thing stopping a still-visible release from being reprocessed — so the daily cron
+duplicates the window every day the benchmark release stays in the feed. Routine slots are
+unaffected (their `benchmark = prior_benchmark(rd)` is unchanged), which is why `test_rerun_is_noop`
+passes; there is **no test that re-runs a benchmark release** — the replay suite runs the Feb-2027
+benchmark exactly once. This violates ARCH §4.3 candidate-key uniqueness and the §7.2/§11 re-run
+convergence guarantee. `latest()`/`as_of()` then surface the highest (fabricated) benchmark counter,
+corrupting reads.
 
-### Important (unverified)
+**Failure scenario:** CES publishes its February annual benchmark; the release stays in the empsit
+feed for months; the daily `bls-stats ingest` cron re-appends the entire multi-year benchmark
+window every day, each copy stamped `benchmark = 2, 3, 4, …` — none of which are real benchmark
+events. Storage grows without bound and the vintage history is corrupted with counters that never
+happened.
 
-- **P-3 — `run_backfill` commits the seed vintage with no validation gates** (`pipeline.py:504`).
-  Same code location as confirmed **C-5**; the vintage reviewer flagged the behavior, the docs
-  reviewer flagged the doc mismatch. Resolve as one unit.
-- **P-4 — Row-band comparator never matches backfill rows, silently skipping the gate for every
-  program's first increment** (`pipeline.py:214`). `_comparator` filters ledger rows on
-  `revision.eq_missing(...)`; backfill rows have null revision/benchmark, so the first live
-  increment (revision 0) finds no comparator and the row-band gate is skipped. Plausible; verify
-  whether that's acceptable (first increment has nothing to compare to anyway) or a real hole.
-- **P-5 ✔ hand-verified — QCEW/OEWS/EP bypass the stale-file freshness guard.** `pipeline.py:374-377`.
-  The guard fires only when `increment_url.startswith("https://download.bls.gov")`. QCEW's URL is
-  `https://data.bls.gov/...`, OEWS's is `https://www.bls.gov/...` — **confirmed** both skip the
-  guard. For QCEW a not-yet-refreshed year zip could be fetched and committed as a current print.
-  Materiality needs checking (the year_to_date empty-slice-defer may cover the newest quarter);
-  the guard's host allowlist is the root cause and should key on freshness support, not a hostname
-  prefix.
-- **P-6 — Delta append silently casts non-vintage columns, incl. lossy Float64→Int64**
-  (`storage/delta.py:82`). `append_observations` enforces dtypes only on the six vintage columns;
-  delta-rs may coerce data columns on write. Verify whether any engine emits a column whose Delta
-  cast is lossy.
-- **P-7 — `store maintain` is a second Delta writer; overlap with ingest/backfill in
-  unsafe-rename mode can lose a committed vintage** (`cli.py:242`). Verify against the
-  single-writer operational assumption (README schedules them at different times).
-- **P-8 — Conditional-PUT probe writes to the bucket root, ignoring the store prefix**
-  (`doctor.py:134`) — false failure under prefix-scoped IAM. Plausible; verify against how the
-  probe key is constructed.
-- **P-9 — OEWS code-column dtype lock is illusory: cast-after-inference is lossy and `naics`/
-  `own_code` are unguarded** (`engines/oews.py:53`). Verify against a real workbook's column types
-  (the T16 review found leading-zero risk theoretical, but this claims a broader gap).
-- **P-10 — `parse_matrix` silently drops mismatched rows and can fabricate a 1-row
-  occupation-only frame, poisoning the year-long Parquet cache** (`engines/ep.py:123`). EP is
-  unwired (guarded exit 2), so blast radius is limited today, but the cache is written regardless.
-- **P-11 — QCEW reads the full ~4 GB uncompressed CSV into memory, breaking the ARCH §10
-  streaming/<8 GB claim** (`engines/qcew.py:59`). Verify whether the scan is truly eager; if so it
-  contradicts a stated design target.
-- **P-12 ✔ hand-verified (code side) — `parse_abbr_date` rejects "Sept." and full month names,
-  silently dropping schedule/lapse rows** (`releases/calendar.py:54`). The regex
-  `[A-Z][a-z]{2}\.?\s+` matches exactly a 3-letter abbreviation then whitespace. **Confirmed**
-  "Sept. 2, 2026" (4-letter) and "June 2, 2026" (full) both fail to match → row dropped.
-  September is the month BLS routinely abbreviates to "Sept.", so this is realistic. Trigger
-  depends on the live page format (offline I can only confirm the parser rejects those spellings).
-  A dropped schedule/lapse row means a missing calendar entry → wrong `backfill` filtering and a
-  `gaps` blind spot.
-- **P-13 — Pinned cancel-drop rule permanently omits periods whose data was published under a
-  later release** (`releases/calendar.py:331`, cites CES October 2025). Verify against
-  `filter_published` semantics and a shutdown/lapse fixture.
-- **P-14 — `filter_published` counts future scheduled releases as published, emitting unpublished
-  periods** (`releases/calendar.py:330`). Verify the date comparison against a pinned "today".
-- **P-15 — `run_backfill` success path, idempotency, and crash-repair are completely untested**
-  (`tests/test_pipeline.py:172`). Coverage gap distinct from the deferred-list items; verify none
-  of those paths are exercised.
+**Remediation:** make the benchmark-window idempotency independent of the derived counter. Options
+(pick one, with a design note): (a) compute the window's benchmark from prints at strictly-**earlier**
+`release_date`s only — i.e. have `prior_benchmark_count` exclude rows whose `release_date` equals
+the release being processed; (b) short-circuit at the event level — if any window row for this exact
+`release_date` is already ingested, treat the benchmark window as done; (c) key the "already done"
+check on `(program, ref_date, release_date, kind)` rather than the counter-bearing slot key.
 
-### Minor (unverified)
+**Acceptance:** a regression test that runs the same benchmark release through `run_ingest`
+**twice** (advancing the injected clock) asserts the observation count and the candidate-key
+uniqueness are identical after the second run, and that no `benchmark=2` row is fabricated.
 
-- **P-16 — `feeds.py:134` invalid embedded date aborts the whole poll** — same root as confirmed
-  **C-2**; fixing C-2 closes it.
-- **P-17 — Naive `Last-Modified` interpreted in host-local time skews the freshness guard**
-  (`core/http.py:179`). *Note: a sibling finding at the same line was genuinely refuted — see
-  §4.* Verify whether this variant differs.
-- **P-18 — Enrich row-count invariant enforced via `assert`, vanishes under `python -O`**
-  (`enrich/cps.py:156`).
-- **P-19 — `run_ingest` exit-code-1 (mixed failed/ok) and cross-event isolation never exercised**
-  (`tests/test_pipeline.py:124`).
-- **P-20 — `gaps` unexplained/acknowledged logic and exit codes have zero tests** (`cli.py:195`) —
-  couples with **C-1**; add tests when C-1 is fixed.
-- **P-21 — `test_bad_log_level_falls_back_to_info` cannot detect loss of the INFO fallback it
-  names** (`tests/test_cli.py:51`) — a test that asserts less than its name claims.
-- **P-22 — `calendar build` docstring says "rebuilds from scratch"; the code appends**
-  (`cli.py:101`).
-- **P-23 — Conditional-PUT probe reports "probe failed" instead of a NOT-honored verdict when an
-  endpoint rejects `If-None-Match` on the first PUT** (`doctor.py:137`).
+### C-14 (Critical) — catch-up/bootstrap `ingest` fetches the current flat file and stamps it as a historical print
+
+**Where:** `src/bls_stats/pipeline.py:294` (the poll loop) and the `_fetch_event` LABSTAT branch.
+Verified 3/3.
+
+**What:** when `poll` returns more than one release — first-ever run, or the cron recovering after
+an outage longer than a day — each not-yet-ingested older release is expanded and fetched. But the
+LABSTAT fetch always downloads the **current** bulk file (latest revised state), and the pipeline
+stamps it with the older release's `release_date` + expanded `revision`/`benchmark`. The result is
+a vintage row claiming an old release date while carrying today's revised values — exactly the
+clairvoyance the vintage model exists to prevent. The freshness guard does not save it: the current
+file's `Last-Modified` is recent, so it passes. The intended catch-up tool is `backfill` (which
+honestly stamps snapshot-date vintages with null counters), but nothing stops `ingest` from
+processing back-dated releases.
+
+**Failure scenario:** the ingest cron is down for a week; on recovery `poll` returns ~5 releases;
+for each missed month `ingest` fetches the current file and writes a `revision=0` "first print" for
+that month containing already-revised numbers — a fabricated point-in-time record that a backtest
+would read as what BLS published that day.
+
+**Remediation:** decide and enforce the contract. Either (a) guard `ingest` so it only fetches/commits
+the **newest** release per program and defers/denies back-dated ones (recording them so `gaps` can
+surface them), or (b) explicitly document that `ingest` must never be used for catch-up, and gate it
+(e.g. refuse when `poll` returns a release older than the latest ingested for that program). Pairs
+with C-1 (the `gaps` audit) and C-13.
+
+**Acceptance:** a test where `poll` returns a release older than the store's latest ingested print
+for that program asserts the old release is not committed as a live vintage (deferred/denied, per
+the chosen contract).
+
+### C-15 (Important) — QCEW / OEWS / EP bypass the stale-file freshness guard
+
+**Where:** `src/bls_stats/pipeline.py:374-378`. Verified 2/3.
+
+**What:** the guard fires only when `spec.increment_url.startswith("https://download.bls.gov")`.
+QCEW's increment URL is `https://data.bls.gov/...`, OEWS's is `https://www.bls.gov/...`, so both
+skip the freshness check entirely. For QCEW, a feed announcement that precedes the year-zip refresh
+means a not-yet-updated zip can be fetched and committed as a current print. The host-prefix
+allowlist is the root cause.
+
+**Remediation:** key the freshness gate on whether the source supports a meaningful `Last-Modified`
+freshness check (a per-program capability flag, or a `HEAD`-supported probe), not a hardcoded
+`download.bls.gov` prefix. For QCEW specifically, confirm whether the `year_to_date` empty-slice
+deferral already covers the newest quarter and document the residual.
+
+**Acceptance:** a test asserts the freshness guard is consulted for QCEW (via `fresh_fn`), or a
+documented rationale explains why QCEW is exempt and what protects it instead.
+
+### C-16 (Important) — row-band validation gate is silently skipped for every program's first increment
+
+**Where:** `src/bls_stats/pipeline.py:214` (`_comparator`). Verified 3/3.
+
+**What:** `_comparator` selects prior ingested rows with `revision.eq_missing(...)` against the new
+slot's revision. Backfill rows carry null `revision`/`benchmark`, so a live `revision=0` increment
+finds no comparator and `validate`'s row-band gate is skipped for the first increment after a
+backfill (i.e. the first live print of every program). Real but bounded: the schema and null-rate
+gates still run; only the ±20% row-count band is skipped, and only once per program.
+
+**Remediation:** decide whether the first increment should compare against the backfill row count
+(treat a null-revision backfill row as a valid comparator for `revision=0`), or accept that the
+first increment has no meaningful band and document it. If comparing, adjust `_comparator` to fall
+back to the latest ingested row for the program regardless of revision when no same-revision
+comparator exists.
+
+**Acceptance:** a test pins the chosen behavior — either the first increment is band-checked against
+the backfill count, or a comment/doc records the deliberate skip.
+
+### C-17 (Important) — conditional-PUT doctor probe writes to the bucket root, ignoring the store prefix
+
+**Where:** `src/bls_stats/storage/doctor.py:133-134`. Verified 2/3.
+
+**What:** the probe extracts the bucket as `store_uri.removeprefix("s3://").split("/", 1)[0]` —
+discarding the key prefix — and PUTs the probe object at the bucket root. Under prefix-scoped IAM
+(credentials permitted only under `s3://bucket/prefix/…`, a common least-privilege setup), the
+root PUT is denied and `doctor` reports the store as *not* conditional-PUT-safe even though the
+actual store path is. A false red line that blocks bootstrap.
+
+**Remediation:** write the probe object under the store's actual prefix (reuse the full
+`store_uri` path, appending a probe key), so the probe exercises the same authorization scope the
+pipeline uses.
+
+**Acceptance:** a test (or doctor self-check) asserts the probe key includes the store prefix, not
+just the bucket.
+
+### C-18 (Important) — OEWS code-column dtype lock is illusory
+
+**Where:** `src/bls_stats/engines/oews.py:53`. Verified 2/2.
+
+**What:** the engine casts only `area`/`occ_code` to `Utf8` after schema inference; other code
+columns (`naics`, `own_code`) are left at their inferred types, so leading zeros can be lost before
+the frame ever reaches the store's vintage-column-only guard. The string-lock invariant (all code
+columns `Utf8`, leading zeros preserved) is not actually enforced for OEWS.
+
+**Remediation:** read the OEWS workbook with all code columns forced to `Utf8` (schema override at
+read time, as the LABSTAT engine does), or extend the post-read cast to every code column
+(`naics`, `own_code`, and any other), not just `area`/`occ_code`.
+
+**Acceptance:** a test on a fixture workbook asserts `naics`/`own_code` come back `Utf8` with
+leading zeros intact.
+
+### C-19 (Important) — QCEW reads the entire uncompressed CSV into memory, contradicting the streaming/<8 GB design target
+
+**Where:** `src/bls_stats/engines/qcew.py:57-63` (`_read_zip_csv`). Verified 2/3.
+
+**What:** `_read_zip_csv` does `pl.read_csv(fh.read(), ...)` — `fh.read()` decompresses the entire
+CSV member (a single-file QCEW year is multiple GB uncompressed) into an in-memory buffer and
+`read_csv` parses it eagerly. ARCH §10 states flat files are parsed via lazy/streaming scans with a
+peak-RSS target < 8 GB and QCEW processed one year at a time; the eager full-member read is the one
+place that can blow the target on a large year.
+
+**Remediation:** stream the CSV member — extract to a temp file and `pl.scan_csv(...).collect(streaming=True)`,
+or use a streaming reader over the zip member — so peak RSS stays bounded. Verify against the
+largest recent QCEW year.
+
+**Acceptance:** a test or a documented measurement shows QCEW single-year parse peak RSS stays under
+the target; the eager `fh.read()` into `read_csv` is gone.
+
+### C-20 (Important) — `run_backfill` success, idempotency, and crash-repair paths are entirely untested
+
+**Where:** `tests/test_pipeline.py:172` (the four existing backfill tests all assert `== 2`, the
+error paths). Verified 3/3.
+
+**What:** every existing `run_backfill` test exercises a failure exit (2); none covers the success
+path, the re-run-is-a-no-op idempotency, or the `slot_exists` crash-repair. Given C-14/C-15 touch
+backfill and C-16 touches the comparator, this is the highest-value coverage gap.
+
+**Remediation:** add tests for: a clean backfill commits the expected snapshot vintages with null
+counters; a second identical backfill is a no-op; a crash between append and ledger record is
+repaired on re-run without duplication.
+
+**Acceptance:** the three behaviors above are pinned by passing tests.
+
+### C-21 (Minor) — `run_ingest` mixed-outcome exit 1 and cross-event isolation are never exercised
+
+**Where:** `tests/test_pipeline.py:124`; behavior at `pipeline.py:323-326`. Verified 3/3.
+
+**What:** no test produces a run with both a failed and a succeeding event, so the "mixed → exit 1"
+branch and the per-event isolation (one program failing must not block others) are uncovered.
+
+**Remediation:** add a test with two events where one raises and one succeeds; assert exit 1 and that
+the succeeding event's data committed.
+
+**Acceptance:** the mixed-outcome path is pinned.
+
+### C-22 (Minor) — `gaps` command logic has zero tests
+
+**Where:** `src/bls_stats/cli.py:195` (and the whole command). Verified 3/3. Couples with **C-1** —
+add these tests as part of the C-1 fix, since C-1 changes what `gaps` computes.
+
+**What:** the program filter, the unexplained anti-join, the acknowledged count, and the exit-code
+contract are untested. Given C-1 shows the command doesn't do what it's documented to do, tests must
+land with the fix.
+
+**Remediation/Acceptance:** covered by C-1's acceptance criteria.
+
+### C-23 (Minor) — `test_bad_log_level_falls_back_to_info` asserts the opposite of its name
+
+**Where:** `tests/test_cli.py:42-51`. Verified 3/3.
+
+**What:** the test is named for the INFO fallback and its comment says `_setup()` "falls back to
+INFO", but its only assertion is `assert settings.log_level == "verbose"` — it checks the raw
+setting, never that logging actually falls back to INFO. The fallback could be deleted and the test
+would still pass.
+
+**Remediation:** assert the effective logging level after `_setup()` (e.g. the root logger's level
+is `INFO` given a bad `BLS_LOG_LEVEL`), not the stored string.
+
+**Acceptance:** the test fails if the INFO-fallback branch is removed.
+
+### C-24 (Minor) — `calendar build` docstring says "rebuilds from scratch"; the code appends
+
+**Where:** `src/bls_stats/cli.py:101-111` — docstring says "Rebuilds the `release_calendar` state
+table from scratch," but the code calls `store.append_state(...)`, which appends. Verified 3/3.
+
+**What:** re-running `calendar build` appends another full scrape rather than replacing, so the
+state table accumulates duplicate calendar rows across runs (downstream consumers are duplicate-safe,
+but the docstring is wrong and the growth is real).
+
+**Remediation:** either make `calendar build` replace the table (snapshot-overwrite) to match the
+docstring, or correct the docstring to say it appends and note the dedup expectation. Coordinate
+with the deferred `calendar.build` dedup item.
+
+**Acceptance:** docstring and behavior agree; if replace is chosen, a test asserts a second build
+does not double the row count.
 
 ---
 
-## 4. Refuted (survived verification as false)
+## 3. Refuted at proposed severity, but with a real mechanism (kept as sub-threshold)
 
-- **`core/http.py:179` — "Naive `Last-Modified` interpreted in host-local time."** Verifier
-  established the skew requires `parsedate_to_datetime` to return a *naive* datetime, which only
-  happens for asctime-format or `-0000` headers, and no real input on this code path produces one:
-  the sole caller chain (`head_last_modified` ← `is_fresh` ← `_process_event`) is gated to
-  `download.bls.gov` increment URLs, and a live HEAD returns a tz-aware RFC-1123 date. Refuted as
-  written. (A differently-scoped variant remains as pending **P-17** — the finder claimed a broader
-  trigger; worth a look but low priority.)
+The second pass reproduced the **mechanism** in each of these but the majority refuted the proposed
+(important) severity because a backstop, spec mandate, or unreachable trigger neutralizes the harm.
+They are recorded — not dropped — because several are worth a cheap hardening fix and one may be
+re-raised if assumptions change. Severity shown is the corrected one.
+
+- **V4 → subsumed by C-5 (not a separate defect).** `run_backfill` committing without `validate()`
+  is **spec-mandated** (ARCH §8, §7.3: backfill is the trusted comparator baseline). So the behavior
+  is correct; the only real issue is the docstring/docs claiming validation happens — which is
+  exactly **C-5**. No new work beyond C-5.
+- **V6 (Minor) — Delta append can silently cast data columns.** `append_observations` dtype-checks
+  only the six vintage columns; delta-rs coerces others on write, and Float64→Int64 is silently
+  lossy. But **no engine emits an Int64 native column** (all value columns are pinned Float64), so
+  the lossy path is inert today. Residual worth a guard: the string-lock on code columns is enforced
+  at parse time, not here — a defensive dtype assertion on unit columns in `append_observations`
+  would make the invariant local. Low priority.
+- **V7 (Minor) — `store maintain` is a second Delta writer.** `optimize.compact()`/`vacuum()` write
+  Delta commits, so concurrent overlap with ingest could lose a commit **in unsafe-rename mode
+  only**. The default `aws_conditional_put=etag` mode is immune, and the README schedules maintain
+  and ingest disjointly. Residual: a doc note "don't run ad-hoc ingest during maintain in
+  unsafe-rename mode," or an advisory lock. Low priority.
+- **V11 (Minor) — `parse_matrix` can fabricate a degenerate 1-row frame.** Real and reproducible
+  (a matrix page where every data row's cell count mismatches the header yields a 1-row
+  occupation-only frame), but **EP is unwired** (guarded exit 2), so no production path reaches it,
+  and the surviving concern sits inside the accepted EP-wiring deferral. Fix when EP is wired: log
+  and skip the degenerate case instead of writing it to the Parquet cache.
+- **V16 (Minor) — `filter_published` counts future scheduled rows toward `max_ref`.** True at the
+  unit level (`max_ref` is inflated by scheduled rows with non-null `release_date`), but the
+  `run_backfill` empty-slice guard intercepts, so no unpublished period is ever emitted to the store.
+  Residual: a redundant fetch attempt for a not-yet-present period. Low priority; add a future-dated
+  fixture when touched.
+
+### 3.1 Contested — needs a human decision
+
+- **V15 — pinned cancel-drop rule permanently omits periods republished under a later release**
+  (`releases/calendar.py:331`, cites CES October 2025). The verifiers split (1 refute / 1 uphold /
+  1 stalled). The **refute** argues the drop is exactly what ARCH §5.4 mandates (`filter_published`
+  pins to the latest published `ref_date` and drops explicitly-cancelled/null-`release_date`
+  periods) — a design decision, not a defect. The **uphold** argues it is a real defect for a store
+  first seeded **after** a government shutdown: a period cancelled in the schedule but later
+  published under a rescheduled release gets permanently omitted from backfill. Both readings are
+  defensible; this is a genuine spec-interpretation question. **Decision needed:** is the
+  post-shutdown-seeding case in scope? If yes, the lapse overlay must distinguish "cancelled and
+  never published" from "rescheduled and later published" when computing the drop set.
+
+### 3.2 Reconciliation of my earlier hand-verifications vs the verified pass
+
+- **V14 (was P-12) — the agents corrected my call.** I hand-verified that `_ABBR_DATE`
+  (`calendar.py:54`) rejects "Sept." and full month spellings, and concluded the finding held. The
+  verified pass showed I over-credited it: "June"/"July" are **reference-period** tokens parsed by a
+  *different* regex (`_MONTH_YEAR`, line 51) that accepts full month names — so 2 of the 3 spellings
+  the finding cites are non-issues (category error). The narrow true residual is that `parse_abbr_date`
+  (release dates + lapse overlay) rejects the 4-letter "Sept."; the schedule path has a numeric-date
+  backstop, but the lapse-overlay path does not. Net: **refuted at "important", real as a Minor**
+  lapse-overlay hardening item — widen `_ABBR_DATE` to accept "Sept"/"Sept." (and ideally full
+  month names) for robustness. My other hand-verifications held: **V1/C-13** and **V3/C-15** were
+  both confirmed by the pass; **V2/C-14** confirmed.
 
 ---
 
-## 5. Recommended triage and how to finish the review
+## 4. Refuted (mechanism does not hold, or no reachable harm)
 
-**Fix order (by risk × likelihood):**
+- **V18 / `core/http.py:179` — "naive `Last-Modified` interpreted in host-local time" (0/3).** The
+  skew requires `parsedate_to_datetime` to return a *naive* datetime, which happens only for
+  asctime-format or `-0000` headers; the sole caller chain is gated to `download.bls.gov` increment
+  URLs, and those emit standard tz-aware IMF-fixdate `Last-Modified`, making the `.astimezone(UTC)`
+  a correct no-op. RFC 9110 forbids the numeric-zone form. The two-line defensive fix is valid
+  polish but the failure path is not reachable with real BLS inputs.
+- **V9 / `storage/doctor.py:137` — conditional-PUT probe reports "probe failed" instead of a
+  NOT-honored verdict (0/3).** Refuted as a defect: the probe's cleanup/verdict handling is
+  acceptable for its purpose, and the scenario (an endpoint that rejects `If-None-Match` on the
+  first PUT) does not produce a materially misleading result in practice.
+- **V13 / `enrich/cps.py:156` — row-count invariant via `assert`, vanishes under `python -O` (0/3).**
+  Refuted: the package is not run under `-O` in any documented path, and the invariant is also
+  guaranteed structurally by the left-join semantics; the `assert` is a belt-and-braces check, not
+  the sole guard.
 
-1. **P-1** (critical, hand-confirmed) — benchmark re-append is active data corruption on every
-   benchmark cycle. Highest priority.
-2. **C-1 / C-2 / P-2** — the monitoring blind spot, the ingest-wide crash, and the historical-print
-   fabrication together undermine the pipeline's core guarantees.
-3. **C-3, C-4, C-6** — silent data loss and broken CLI/doctor contracts operators rely on.
-4. **C-5 + P-3 + P-4** — settle the backfill validation contract as one unit.
-5. Remaining confirmed minors (C-7…C-12) and the pending list.
+---
 
-**Completing verification:** when account budget resets, re-run the adversarial verification for
-the §3 pending findings. The workflow script is saved at
-`.../workflows/scripts/thorough-codebase-review-wf_349cd0e4-437.js` and supports resume
-(`Workflow({scriptPath, resumeFromRunId: "wf_349cd0e4-437"})`) — completed finder/verifier agents
-return cached results, so only the starved verifiers re-run. Alternatively, verify the pending
-items directly against the code as I did for P-1/P-2/P-5/P-12.
+## 5. Recommended triage and status
 
-**Note on the fixes:** every confirmed finding has a concrete remediation and acceptance criterion
-above; none is a speculative "consider adding". The confirmed set is dominated by two clusters —
-the `gaps` command not matching its own contract, and CLI/doctor error-handling that turns
-operator mistakes into tracebacks — plus the OEWS backfill data-loss bug. Those clusters, and P-1,
-are where a fix plan should start.
+**Verification is complete** — every finding has a verdict. Fix order by risk × likelihood:
+
+1. **C-13** (critical) — benchmark re-append is active, unbounded data corruption on the normal
+   daily cron. Highest priority; ships with the twice-run regression test.
+2. **C-14** (critical) — catch-up/bootstrap `ingest` fabricating historical prints. Settle the
+   `ingest`-vs-`backfill` catch-up contract.
+3. **C-1 / C-2** — the `gaps` monitoring blind spot and the ingest-wide feed-parse crash; both
+   undermine core guarantees. (C-2 closes the old P-16 too.)
+4. **C-3, C-4, C-6** — silent OEWS backfill data loss, CLI KeyError tracebacks, doctor exit contract.
+5. **C-15, C-16** — freshness-guard host allowlist and the skipped first-increment row band.
+6. **C-5** — settle the backfill-validation docs/contract (subsumes V4).
+7. **C-17, C-18, C-19** — prefix-scoped doctor probe, OEWS string-lock, QCEW memory.
+8. **C-20 / C-21 / C-22 / C-23** — the test-coverage gaps (backfill, mixed-ingest, `gaps`, log-level).
+9. Confirmed doc/polish minors (C-7…C-12, C-24) and the §3 sub-threshold hardening items.
+10. **Decide V15** (§3.1) — the one open spec-interpretation question.
+
+**Provenance:** first review run `wf_349cd0e4-437` (finders + partial verify); completion run
+`wf_2f1d5888-6ea` (23 findings × 3 lenses, 2 verifier stalls that still reached quorum). Both
+workflow scripts are under the session's `workflows/scripts/`. Every confirmed finding above has a
+concrete remediation and acceptance criterion — none is a speculative "consider adding".
