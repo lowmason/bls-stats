@@ -315,3 +315,33 @@ def test_comparator_falls_back_to_latest_ingested(store) -> None:  # C-16
     )
     # revision=0 increment has no same-revision comparator, but a backfill baseline exists:
     assert _comparator(ledger, "ces", 0) == 500
+
+
+def test_oews_multiyear_backfill_fetches_all_years(store, monkeypatch) -> None:  # C-3
+    import bls_stats.engines.oews as oews_engine
+
+    def fake_oews(client, year, dest_dir, downloaded):
+        return pl.DataFrame(
+            {
+                "area": ["0000000"],
+                "occ_code": ["00-0000"],
+                "value": [1.0],
+                "ref_date": [date(year, 5, 12)],
+                "downloaded": [downloaded],
+            },
+            schema={
+                "area": pl.Utf8,
+                "occ_code": pl.Utf8,
+                "value": pl.Float64,
+                "ref_date": pl.Date,
+                "downloaded": pl.Datetime("us", "UTC"),
+            },
+        )
+
+    monkeypatch.setattr(oews_engine, "fetch_year", fake_oews)
+    from bls_stats.pipeline import _fetch_event
+    from bls_stats.releases.profiles import Slot
+
+    slots = [Slot(date(y, 5, 12), None, None, "backfill") for y in (2020, 2021, 2022)]
+    df = _fetch_event(None, "oews", slots, __import__("pathlib").Path("/tmp"), NOW)
+    assert sorted(df["ref_date"].dt.year().unique().to_list()) == [2020, 2021, 2022]

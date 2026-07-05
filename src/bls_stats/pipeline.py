@@ -154,7 +154,11 @@ def _fetch_event(
     if program == "oews":
         from bls_stats.engines.oews import fetch_year as fetch_oews
 
-        return fetch_oews(client, refs[0].year, dest_dir, downloaded)
+        frames = [
+            fetch_oews(client, year, dest_dir, downloaded)
+            for year in sorted({r.year for r in refs})
+        ]
+        return pl.concat(frames, how="vertical_relaxed")
     if program == "ep":  # scrape-date vintages need a storage schema decision (ARCH §12)
         raise ValidationError("ep fetch is not wired to the vintage store")
     from bls_stats.engines.labstat import fetch
@@ -568,6 +572,7 @@ def run_backfill(
                 df.filter(pl.col("ref_date") == slot.ref_date) if "ref_date" in df.columns else df
             )
             if piece.is_empty():
+                log.warning("%s: no rows for %s in fetched data — skipped", program, slot.ref_date)
                 continue
             stamped = stamp(piece, slot.ref_date, snapshot_date, None, None, "backfill", now)
             if not store.slot_exists(program, slot.ref_date, snapshot_date, None, None):
