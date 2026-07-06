@@ -1,9 +1,9 @@
 # bls-stats codebase audit — 2026-07-05
 
-> **STATUS: OPEN** — findings only, no code changed. This document is the source of record for a
+> **STATUS: REMEDIATED** (2026-07-06) — all 25 confirmed findings (C-1…C-25) fixed test-first on branch `impl-plan-2` (PR #1); see `specs/plans/completed/2-audit_5-7-26.md`. Retained as the historical source of record for a
 > whole-codebase adversarial review. Confirmed findings are written as actionable requirements
 > (location, failure scenario, remediation, acceptance criteria) so this can feed a plan through
-> the normal specs → plans → implementation flow. Nothing here is fixed yet.
+> the normal specs → plans → implementation flow. All 25 items are now remediated (see the plan).
 >
 > **Verification complete (2026-07-05).** The adversarial pass the spend limit originally cut short
 > was re-run to completion. Of **40 raw findings**: **31 confirmed** (consolidated to 25 requirement
