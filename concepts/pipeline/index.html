@@ -1185,7 +1185,10 @@ scheduler sees. Everything else (engines, feeds, storage) is a library it compos
 <p>An exception inside one event is isolated: it is logged, the event's outcome is recorded, and the
 loop continues with the next event. One broken program never blocks the rest.</p>
 <h2 id="validation-gates">Validation gates<a class="headerlink" href="#validation-gates" title="Permanent link">&para;</a></h2>
-<p><a class="autorefs autorefs-internal" title="            validate" href="../../reference/pipeline/#bls_stats.pipeline.validate"><code>validate</code></a> runs before every commit:</p>
+<p><a class="autorefs autorefs-internal" title="            validate" href="../../reference/pipeline/#bls_stats.pipeline.validate"><code>validate</code></a> runs before every <strong>ingest</strong> commit. <code>backfill</code> is the
+trusted historical baseline (ARCH §7.3): it skips the row-band/null-rate gates deliberately — the
+string locks are enforced at the engine/parse layer and the store's vintage-schema gate still
+guards every append — so a backfill commit is not <code>validate()</code>-gated.</p>
 <table>
 <thead>
 <tr>

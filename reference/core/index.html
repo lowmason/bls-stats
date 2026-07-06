@@ -1701,7 +1701,8 @@
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">api_key</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">log_level</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s2">&quot;INFO&quot;</span><span class="p">,</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">aws_endpoint_url</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">metadata_cache_dir</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s2">&quot;data/cps_metadata&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -1787,6 +1788,18 @@ because <code>BLS_CONTACT_EMAIL</code> was unset — <code>doctor</code> surface
               <div class="doc-md-description">
                 <p>S3-compatible endpoint override (MinIO vs. a corporate endpoint
 differ by this one variable), or <code>None</code> to use the AWS default resolution.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="bls_stats.core.config.Settings.metadata_cache_dir">metadata_cache_dir</span></code></td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Local cache dir for CPS dimension tables (series catalog +
+<code>ln.*</code> mappings), configurable so it doesn't silently depend on cwd.</p>
               </div>
             </td>
           </tr>
@@ -1914,7 +1927,22 @@ without a <code>.project.env</code> still resolve to defaults.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>BLS_LOG_LEVEL</code>, and <code>AWS_ENDPOINT_URL</code>, falling back to documented defaults.</p>
+                <p><code>BLS_LOG_LEVEL</code>, <code>AWS_ENDPOINT_URL</code>, and <code>BLS_METADATA_CACHE</code>, falling back to</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            Settings
+
+
+  
+      dataclass
+   (bls_stats.core.config.Settings)" href="#bls_stats.core.config.Settings">Settings</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>documented defaults.</p>
               </div>
             </td>
           </tr>
@@ -1924,10 +1952,7 @@ without a <code>.project.env</code> still resolve to defaults.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/bls_stats/core/config.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-38">38</a></span>
-<span class="normal"><a href="#__codelineno-0-39">39</a></span>
-<span class="normal"><a href="#__codelineno-0-40">40</a></span>
-<span class="normal"><a href="#__codelineno-0-41">41</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-41">41</a></span>
 <span class="normal"><a href="#__codelineno-0-42">42</a></span>
 <span class="normal"><a href="#__codelineno-0-43">43</a></span>
 <span class="normal"><a href="#__codelineno-0-44">44</a></span>
@@ -1948,31 +1973,38 @@ without a <code>.project.env</code> still resolve to defaults.</p>
 <span class="normal"><a href="#__codelineno-0-59">59</a></span>
 <span class="normal"><a href="#__codelineno-0-60">60</a></span>
 <span class="normal"><a href="#__codelineno-0-61">61</a></span>
-<span class="normal"><a href="#__codelineno-0-62">62</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-38" name="__codelineno-0-38"></a><span class="k">def</span><span class="w"> </span><span class="nf">load_settings</span><span class="p">(</span><span class="n">env_file</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">ENV_FILE</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Settings</span><span class="p">:</span>
-<a id="__codelineno-0-39" name="__codelineno-0-39"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Build `Settings` from the environment, loading `env_file` first via python-dotenv.</span>
-<a id="__codelineno-0-40" name="__codelineno-0-40"></a>
-<a id="__codelineno-0-41" name="__codelineno-0-41"></a><span class="sd">    Existing environment variables take precedence over the file&#39;s values (python-dotenv</span>
-<a id="__codelineno-0-42" name="__codelineno-0-42"></a><span class="sd">    default). Missing `env_file` is silently a no-op — not an error — so tests and containers</span>
-<a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="sd">    without a `.project.env` still resolve to defaults.</span>
-<a id="__codelineno-0-44" name="__codelineno-0-44"></a>
-<a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-46" name="__codelineno-0-46"></a><span class="sd">        env_file: Path to the dotenv file to load before reading variables. Defaults to</span>
-<a id="__codelineno-0-47" name="__codelineno-0-47"></a><span class="sd">            `.project.env` (ARCH §1), the project&#39;s gitignored secrets file.</span>
-<a id="__codelineno-0-48" name="__codelineno-0-48"></a>
-<a id="__codelineno-0-49" name="__codelineno-0-49"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-50" name="__codelineno-0-50"></a><span class="sd">        A `Settings` populated from `BLS_STORE_URI`, `BLS_CONTACT_EMAIL`, `BLS_API_KEY`,</span>
-<a id="__codelineno-0-51" name="__codelineno-0-51"></a><span class="sd">        `BLS_LOG_LEVEL`, and `AWS_ENDPOINT_URL`, falling back to documented defaults.</span>
-<a id="__codelineno-0-52" name="__codelineno-0-52"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-53" name="__codelineno-0-53"></a>    <span class="n">load_dotenv</span><span class="p">(</span><span class="n">env_file</span><span class="p">)</span>  <span class="c1"># silently a no-op when the file is absent</span>
-<a id="__codelineno-0-54" name="__codelineno-0-54"></a>    <span class="n">email</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_CONTACT_EMAIL&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-55" name="__codelineno-0-55"></a>    <span class="k">return</span> <span class="n">Settings</span><span class="p">(</span>
-<a id="__codelineno-0-56" name="__codelineno-0-56"></a>        <span class="n">store_uri</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_STORE_URI&quot;</span><span class="p">,</span> <span class="s2">&quot;./data/store&quot;</span><span class="p">),</span>
-<a id="__codelineno-0-57" name="__codelineno-0-57"></a>        <span class="n">contact_email</span><span class="o">=</span><span class="n">email</span> <span class="ow">or</span> <span class="s2">&quot;research@example.com&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-58" name="__codelineno-0-58"></a>        <span class="n">contact_email_is_default</span><span class="o">=</span><span class="n">email</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-59" name="__codelineno-0-59"></a>        <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_API_KEY&quot;</span><span class="p">),</span>
-<a id="__codelineno-0-60" name="__codelineno-0-60"></a>        <span class="n">log_level</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_LOG_LEVEL&quot;</span><span class="p">,</span> <span class="s2">&quot;INFO&quot;</span><span class="p">),</span>
-<a id="__codelineno-0-61" name="__codelineno-0-61"></a>        <span class="n">aws_endpoint_url</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;AWS_ENDPOINT_URL&quot;</span><span class="p">),</span>
-<a id="__codelineno-0-62" name="__codelineno-0-62"></a>    <span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-62">62</a></span>
+<span class="normal"><a href="#__codelineno-0-63">63</a></span>
+<span class="normal"><a href="#__codelineno-0-64">64</a></span>
+<span class="normal"><a href="#__codelineno-0-65">65</a></span>
+<span class="normal"><a href="#__codelineno-0-66">66</a></span>
+<span class="normal"><a href="#__codelineno-0-67">67</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-41" name="__codelineno-0-41"></a><span class="k">def</span><span class="w"> </span><span class="nf">load_settings</span><span class="p">(</span><span class="n">env_file</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">ENV_FILE</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Settings</span><span class="p">:</span>
+<a id="__codelineno-0-42" name="__codelineno-0-42"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Build `Settings` from the environment, loading `env_file` first via python-dotenv.</span>
+<a id="__codelineno-0-43" name="__codelineno-0-43"></a>
+<a id="__codelineno-0-44" name="__codelineno-0-44"></a><span class="sd">    Existing environment variables take precedence over the file&#39;s values (python-dotenv</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">    default). Missing `env_file` is silently a no-op — not an error — so tests and containers</span>
+<a id="__codelineno-0-46" name="__codelineno-0-46"></a><span class="sd">    without a `.project.env` still resolve to defaults.</span>
+<a id="__codelineno-0-47" name="__codelineno-0-47"></a>
+<a id="__codelineno-0-48" name="__codelineno-0-48"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49"></a><span class="sd">        env_file: Path to the dotenv file to load before reading variables. Defaults to</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50"></a><span class="sd">            `.project.env` (ARCH §1), the project&#39;s gitignored secrets file.</span>
+<a id="__codelineno-0-51" name="__codelineno-0-51"></a>
+<a id="__codelineno-0-52" name="__codelineno-0-52"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="sd">        A `Settings` populated from `BLS_STORE_URI`, `BLS_CONTACT_EMAIL`, `BLS_API_KEY`,</span>
+<a id="__codelineno-0-54" name="__codelineno-0-54"></a><span class="sd">        `BLS_LOG_LEVEL`, `AWS_ENDPOINT_URL`, and `BLS_METADATA_CACHE`, falling back to</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55"></a><span class="sd">        documented defaults.</span>
+<a id="__codelineno-0-56" name="__codelineno-0-56"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57"></a>    <span class="n">load_dotenv</span><span class="p">(</span><span class="n">env_file</span><span class="p">)</span>  <span class="c1"># silently a no-op when the file is absent</span>
+<a id="__codelineno-0-58" name="__codelineno-0-58"></a>    <span class="n">email</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_CONTACT_EMAIL&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-59" name="__codelineno-0-59"></a>    <span class="k">return</span> <span class="n">Settings</span><span class="p">(</span>
+<a id="__codelineno-0-60" name="__codelineno-0-60"></a>        <span class="n">store_uri</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_STORE_URI&quot;</span><span class="p">,</span> <span class="s2">&quot;./data/store&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-61" name="__codelineno-0-61"></a>        <span class="n">contact_email</span><span class="o">=</span><span class="n">email</span> <span class="ow">or</span> <span class="s2">&quot;research@example.com&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-62" name="__codelineno-0-62"></a>        <span class="n">contact_email_is_default</span><span class="o">=</span><span class="n">email</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-63" name="__codelineno-0-63"></a>        <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_API_KEY&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-64" name="__codelineno-0-64"></a>        <span class="n">log_level</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_LOG_LEVEL&quot;</span><span class="p">,</span> <span class="s2">&quot;INFO&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-65" name="__codelineno-0-65"></a>        <span class="n">aws_endpoint_url</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;AWS_ENDPOINT_URL&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-66" name="__codelineno-0-66"></a>        <span class="n">metadata_cache_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_METADATA_CACHE&quot;</span><span class="p">,</span> <span class="s2">&quot;data/cps_metadata&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-67" name="__codelineno-0-67"></a>    <span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2066,12 +2098,7 @@ the daily cron; <code>doctor</code> advises which mode an endpoint needs).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/bls_stats/core/config.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-65">65</a></span>
-<span class="normal"><a href="#__codelineno-0-66">66</a></span>
-<span class="normal"><a href="#__codelineno-0-67">67</a></span>
-<span class="normal"><a href="#__codelineno-0-68">68</a></span>
-<span class="normal"><a href="#__codelineno-0-69">69</a></span>
-<span class="normal"><a href="#__codelineno-0-70">70</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-70">70</a></span>
 <span class="normal"><a href="#__codelineno-0-71">71</a></span>
 <span class="normal"><a href="#__codelineno-0-72">72</a></span>
 <span class="normal"><a href="#__codelineno-0-73">73</a></span>
@@ -2092,33 +2119,38 @@ the daily cron; <code>doctor</code> advises which mode an endpoint needs).</p>
 <span class="normal"><a href="#__codelineno-0-88">88</a></span>
 <span class="normal"><a href="#__codelineno-0-89">89</a></span>
 <span class="normal"><a href="#__codelineno-0-90">90</a></span>
-<span class="normal"><a href="#__codelineno-0-91">91</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="k">def</span><span class="w"> </span><span class="nf">storage_options</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="n">Settings</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
-<a id="__codelineno-0-66" name="__codelineno-0-66"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Build delta-rs storage options, selecting commit-safety mode per ARCH §4.1.</span>
-<a id="__codelineno-0-67" name="__codelineno-0-67"></a>
-<a id="__codelineno-0-68" name="__codelineno-0-68"></a><span class="sd">    Local paths need no S3 options at all. For `s3://` stores, conditional PUT</span>
-<a id="__codelineno-0-69" name="__codelineno-0-69"></a><span class="sd">    (`aws_conditional_put=etag`) is the default — fully safe atomic commits — unless</span>
-<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">    `BLS_S3_UNSAFE_RENAME=true` is set, which switches to single-writer mode for endpoints</span>
-<a id="__codelineno-0-71" name="__codelineno-0-71"></a><span class="sd">    that don&#39;t support conditional PUT (sound only because the design has exactly one writer,</span>
-<a id="__codelineno-0-72" name="__codelineno-0-72"></a><span class="sd">    the daily cron; `doctor` advises which mode an endpoint needs).</span>
-<a id="__codelineno-0-73" name="__codelineno-0-73"></a>
-<a id="__codelineno-0-74" name="__codelineno-0-74"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="sd">        s: Resolved settings; `store_uri` and `aws_endpoint_url` drive the decision.</span>
-<a id="__codelineno-0-76" name="__codelineno-0-76"></a>
-<a id="__codelineno-0-77" name="__codelineno-0-77"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-78" name="__codelineno-0-78"></a><span class="sd">        A dict of delta-rs storage option keys/values, empty for a local (non-`s3://`) store.</span>
-<a id="__codelineno-0-79" name="__codelineno-0-79"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-80" name="__codelineno-0-80"></a>    <span class="n">opts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-<a id="__codelineno-0-81" name="__codelineno-0-81"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">s</span><span class="o">.</span><span class="n">store_uri</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;s3://&quot;</span><span class="p">):</span>
-<a id="__codelineno-0-82" name="__codelineno-0-82"></a>        <span class="k">return</span> <span class="n">opts</span>  <span class="c1"># local store: no S3 options (laptop-only convenience, ARCH §10)</span>
-<a id="__codelineno-0-83" name="__codelineno-0-83"></a>    <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">aws_endpoint_url</span><span class="p">:</span>
-<a id="__codelineno-0-84" name="__codelineno-0-84"></a>        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;AWS_ENDPOINT_URL&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">aws_endpoint_url</span>
-<a id="__codelineno-0-85" name="__codelineno-0-85"></a>        <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">aws_endpoint_url</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;http://&quot;</span><span class="p">):</span>
-<a id="__codelineno-0-86" name="__codelineno-0-86"></a>            <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;AWS_ALLOW_HTTP&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;true&quot;</span>
-<a id="__codelineno-0-87" name="__codelineno-0-87"></a>    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_S3_UNSAFE_RENAME&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;true&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-88" name="__codelineno-0-88"></a>        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;AWS_S3_ALLOW_UNSAFE_RENAME&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;true&quot;</span>
-<a id="__codelineno-0-89" name="__codelineno-0-89"></a>    <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-90" name="__codelineno-0-90"></a>        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;aws_conditional_put&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;etag&quot;</span>
-<a id="__codelineno-0-91" name="__codelineno-0-91"></a>    <span class="k">return</span> <span class="n">opts</span>
+<span class="normal"><a href="#__codelineno-0-91">91</a></span>
+<span class="normal"><a href="#__codelineno-0-92">92</a></span>
+<span class="normal"><a href="#__codelineno-0-93">93</a></span>
+<span class="normal"><a href="#__codelineno-0-94">94</a></span>
+<span class="normal"><a href="#__codelineno-0-95">95</a></span>
+<span class="normal"><a href="#__codelineno-0-96">96</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="k">def</span><span class="w"> </span><span class="nf">storage_options</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="n">Settings</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<a id="__codelineno-0-71" name="__codelineno-0-71"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Build delta-rs storage options, selecting commit-safety mode per ARCH §4.1.</span>
+<a id="__codelineno-0-72" name="__codelineno-0-72"></a>
+<a id="__codelineno-0-73" name="__codelineno-0-73"></a><span class="sd">    Local paths need no S3 options at all. For `s3://` stores, conditional PUT</span>
+<a id="__codelineno-0-74" name="__codelineno-0-74"></a><span class="sd">    (`aws_conditional_put=etag`) is the default — fully safe atomic commits — unless</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="sd">    `BLS_S3_UNSAFE_RENAME=true` is set, which switches to single-writer mode for endpoints</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="sd">    that don&#39;t support conditional PUT (sound only because the design has exactly one writer,</span>
+<a id="__codelineno-0-77" name="__codelineno-0-77"></a><span class="sd">    the daily cron; `doctor` advises which mode an endpoint needs).</span>
+<a id="__codelineno-0-78" name="__codelineno-0-78"></a>
+<a id="__codelineno-0-79" name="__codelineno-0-79"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-80" name="__codelineno-0-80"></a><span class="sd">        s: Resolved settings; `store_uri` and `aws_endpoint_url` drive the decision.</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81"></a>
+<a id="__codelineno-0-82" name="__codelineno-0-82"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-83" name="__codelineno-0-83"></a><span class="sd">        A dict of delta-rs storage option keys/values, empty for a local (non-`s3://`) store.</span>
+<a id="__codelineno-0-84" name="__codelineno-0-84"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-85" name="__codelineno-0-85"></a>    <span class="n">opts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-86" name="__codelineno-0-86"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">s</span><span class="o">.</span><span class="n">store_uri</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;s3://&quot;</span><span class="p">):</span>
+<a id="__codelineno-0-87" name="__codelineno-0-87"></a>        <span class="k">return</span> <span class="n">opts</span>  <span class="c1"># local store: no S3 options (laptop-only convenience, ARCH §10)</span>
+<a id="__codelineno-0-88" name="__codelineno-0-88"></a>    <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">aws_endpoint_url</span><span class="p">:</span>
+<a id="__codelineno-0-89" name="__codelineno-0-89"></a>        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;AWS_ENDPOINT_URL&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">aws_endpoint_url</span>
+<a id="__codelineno-0-90" name="__codelineno-0-90"></a>        <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">aws_endpoint_url</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;http://&quot;</span><span class="p">):</span>
+<a id="__codelineno-0-91" name="__codelineno-0-91"></a>            <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;AWS_ALLOW_HTTP&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;true&quot;</span>
+<a id="__codelineno-0-92" name="__codelineno-0-92"></a>    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;BLS_S3_UNSAFE_RENAME&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;true&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-93" name="__codelineno-0-93"></a>        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;AWS_S3_ALLOW_UNSAFE_RENAME&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;true&quot;</span>
+<a id="__codelineno-0-94" name="__codelineno-0-94"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-95" name="__codelineno-0-95"></a>        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;aws_conditional_put&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;etag&quot;</span>
+<a id="__codelineno-0-96" name="__codelineno-0-96"></a>    <span class="k">return</span> <span class="n">opts</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

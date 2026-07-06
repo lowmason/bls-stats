@@ -2094,8 +2094,10 @@ only other null rows, not be excluded or mismatched by ordinary <code>==</code> 
 
 <a href="#bls_stats.vintage.ledger.Ledger.prior_benchmark_count" class="headerlink" title="Permanent link">&para;</a></h4>
 <div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">prior_benchmark_count</span><span class="p">(</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">program</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">ref_date</span><span class="p">:</span> <span class="n"><span title="datetime.date">date</span></span> <span class="o">|</span> <span class="kc">None</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="int">int</span></span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">program</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">ref_date</span><span class="p">:</span> <span class="n"><span title="datetime.date">date</span></span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">before_release</span><span class="p">:</span> <span class="n"><span title="datetime.date">date</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="int">int</span></span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -2104,7 +2106,12 @@ only other null rows, not be excluded or mismatched by ordinary <code>==</code> 
 <p>The pipeline passes this as the prior-count callback into <code>expand()</code>, which uses it to
 assign the next benchmark counter to a new benchmark event. Only <code>status == "ingested"</code>
 rows count — a <code>deferred</code> benchmark slot has not actually landed data yet, so it must
-not advance the counter (ARCH §5.3: deferred events retry until superseded or missed).</p>
+not advance the counter (ARCH §5.3).</p>
+<p>When <code>before_release</code> is given, only rows with <code>release_date &lt; before_release</code> count.
+The pipeline passes the release being processed, so the counter is derived from prints
+at strictly-earlier release dates — a re-poll of the same benchmark release therefore
+recomputes the same counter and its slots resolve as already-ingested (idempotent,
+ARCH §4.3/§7.2), instead of climbing 1→2→3 and re-appending the window every run.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2143,12 +2150,27 @@ not advance the counter (ARCH §5.3: deferred events retry until superseded or m
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Canonical period date; matched null-safely (relevant for programs whose
-registry allows a null <code>ref_date</code>).</p>
+                <p>Canonical period date; matched null-safely.</p>
               </div>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>before_release</code>
+            </td>
+            <td>
+                  <code><span title="datetime.date">date</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If given, exclude rows whose <code>release_date</code> is not strictly earlier.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>
@@ -2170,17 +2192,7 @@ registry allows a null <code>ref_date</code>).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The maximum <code>benchmark</code> value among ingested rows for this (program, ref_date), or</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="int">int</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>0</code> if none have ever been ingested.</p>
+                <p>The maximum <code>benchmark</code> among qualifying ingested rows, or <code>0</code> if none.</p>
               </div>
             </td>
           </tr>
@@ -2216,33 +2228,45 @@ registry allows a null <code>ref_date</code>).</p>
 <span class="normal"><a href="#__codelineno-0-185">185</a></span>
 <span class="normal"><a href="#__codelineno-0-186">186</a></span>
 <span class="normal"><a href="#__codelineno-0-187">187</a></span>
-<span class="normal"><a href="#__codelineno-0-188">188</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-162" name="__codelineno-0-162"></a><span class="k">def</span><span class="w"> </span><span class="nf">prior_benchmark_count</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">program</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ref_date</span><span class="p">:</span> <span class="n">date</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<a id="__codelineno-0-163" name="__codelineno-0-163"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Highest benchmark counter successfully ingested so far for a (program, ref_date).</span>
-<a id="__codelineno-0-164" name="__codelineno-0-164"></a>
-<a id="__codelineno-0-165" name="__codelineno-0-165"></a><span class="sd">    The pipeline passes this as the prior-count callback into `expand()`, which uses it to</span>
-<a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="sd">    assign the next benchmark counter to a new benchmark event. Only `status == &quot;ingested&quot;`</span>
-<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">    rows count — a `deferred` benchmark slot has not actually landed data yet, so it must</span>
-<a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">    not advance the counter (ARCH §5.3: deferred events retry until superseded or missed).</span>
-<a id="__codelineno-0-169" name="__codelineno-0-169"></a>
-<a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">        program: Program key.</span>
-<a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">        ref_date: Canonical period date; matched null-safely (relevant for programs whose</span>
-<a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">            registry allows a null `ref_date`).</span>
-<a id="__codelineno-0-174" name="__codelineno-0-174"></a>
-<a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-176" name="__codelineno-0-176"></a><span class="sd">        The maximum `benchmark` value among ingested rows for this (program, ref_date), or</span>
-<a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">        `0` if none have ever been ingested.</span>
-<a id="__codelineno-0-178" name="__codelineno-0-178"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-179" name="__codelineno-0-179"></a>    <span class="n">got</span> <span class="o">=</span> <span class="p">(</span>
-<a id="__codelineno-0-180" name="__codelineno-0-180"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">resolved</span><span class="p">()</span>
-<a id="__codelineno-0-181" name="__codelineno-0-181"></a>        <span class="o">.</span><span class="n">filter</span><span class="p">(</span>
-<a id="__codelineno-0-182" name="__codelineno-0-182"></a>            <span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;program&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">program</span><span class="p">)</span>
-<a id="__codelineno-0-183" name="__codelineno-0-183"></a>            <span class="o">&amp;</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;ref_date&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">eq_missing</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">lit</span><span class="p">(</span><span class="n">ref_date</span><span class="p">))</span>
-<a id="__codelineno-0-184" name="__codelineno-0-184"></a>            <span class="o">&amp;</span> <span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;ingested&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-185" name="__codelineno-0-185"></a>        <span class="p">)[</span><span class="s2">&quot;benchmark&quot;</span><span class="p">]</span>
-<a id="__codelineno-0-186" name="__codelineno-0-186"></a>        <span class="o">.</span><span class="n">max</span><span class="p">()</span>
-<a id="__codelineno-0-187" name="__codelineno-0-187"></a>    <span class="p">)</span>
-<a id="__codelineno-0-188" name="__codelineno-0-188"></a>    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">got</span><span class="p">)</span> <span class="k">if</span> <span class="n">got</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="mi">0</span>
+<span class="normal"><a href="#__codelineno-0-188">188</a></span>
+<span class="normal"><a href="#__codelineno-0-189">189</a></span>
+<span class="normal"><a href="#__codelineno-0-190">190</a></span>
+<span class="normal"><a href="#__codelineno-0-191">191</a></span>
+<span class="normal"><a href="#__codelineno-0-192">192</a></span>
+<span class="normal"><a href="#__codelineno-0-193">193</a></span>
+<span class="normal"><a href="#__codelineno-0-194">194</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-162" name="__codelineno-0-162"></a><span class="k">def</span><span class="w"> </span><span class="nf">prior_benchmark_count</span><span class="p">(</span>
+<a id="__codelineno-0-163" name="__codelineno-0-163"></a>    <span class="bp">self</span><span class="p">,</span> <span class="n">program</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ref_date</span><span class="p">:</span> <span class="n">date</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">before_release</span><span class="p">:</span> <span class="n">date</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-164" name="__codelineno-0-164"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<a id="__codelineno-0-165" name="__codelineno-0-165"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Highest benchmark counter successfully ingested so far for a (program, ref_date).</span>
+<a id="__codelineno-0-166" name="__codelineno-0-166"></a>
+<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">    The pipeline passes this as the prior-count callback into `expand()`, which uses it to</span>
+<a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">    assign the next benchmark counter to a new benchmark event. Only `status == &quot;ingested&quot;`</span>
+<a id="__codelineno-0-169" name="__codelineno-0-169"></a><span class="sd">    rows count — a `deferred` benchmark slot has not actually landed data yet, so it must</span>
+<a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">    not advance the counter (ARCH §5.3).</span>
+<a id="__codelineno-0-171" name="__codelineno-0-171"></a>
+<a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">    When `before_release` is given, only rows with `release_date &lt; before_release` count.</span>
+<a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">    The pipeline passes the release being processed, so the counter is derived from prints</span>
+<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">    at strictly-earlier release dates — a re-poll of the same benchmark release therefore</span>
+<a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">    recomputes the same counter and its slots resolve as already-ingested (idempotent,</span>
+<a id="__codelineno-0-176" name="__codelineno-0-176"></a><span class="sd">    ARCH §4.3/§7.2), instead of climbing 1→2→3 and re-appending the window every run.</span>
+<a id="__codelineno-0-177" name="__codelineno-0-177"></a>
+<a id="__codelineno-0-178" name="__codelineno-0-178"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-179" name="__codelineno-0-179"></a><span class="sd">        program: Program key.</span>
+<a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">        ref_date: Canonical period date; matched null-safely.</span>
+<a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">        before_release: If given, exclude rows whose `release_date` is not strictly earlier.</span>
+<a id="__codelineno-0-182" name="__codelineno-0-182"></a>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-184" name="__codelineno-0-184"></a><span class="sd">        The maximum `benchmark` among qualifying ingested rows, or `0` if none.</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="n">rows</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">resolved</span><span class="p">()</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span>
+<a id="__codelineno-0-187" name="__codelineno-0-187"></a>        <span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;program&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">program</span><span class="p">)</span>
+<a id="__codelineno-0-188" name="__codelineno-0-188"></a>        <span class="o">&amp;</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;ref_date&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">eq_missing</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">lit</span><span class="p">(</span><span class="n">ref_date</span><span class="p">))</span>
+<a id="__codelineno-0-189" name="__codelineno-0-189"></a>        <span class="o">&amp;</span> <span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;ingested&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-190" name="__codelineno-0-190"></a>    <span class="p">)</span>
+<a id="__codelineno-0-191" name="__codelineno-0-191"></a>    <span class="k">if</span> <span class="n">before_release</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-192" name="__codelineno-0-192"></a>        <span class="n">rows</span> <span class="o">=</span> <span class="n">rows</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;release_date&quot;</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">before_release</span><span class="p">)</span>
+<a id="__codelineno-0-193" name="__codelineno-0-193"></a>    <span class="n">got</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="s2">&quot;benchmark&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+<a id="__codelineno-0-194" name="__codelineno-0-194"></a>    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">got</span><span class="p">)</span> <span class="k">if</span> <span class="n">got</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="mi">0</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

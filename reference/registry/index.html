@@ -1473,7 +1473,8 @@ empirical placeholders pending verification against real events (ARCH §12).</p>
    (bls_stats.registry.RevisionProfile)" href="#bls_stats.registry.RevisionProfile">RevisionProfile</a></span><span class="p">,</span>
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">row_band</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.2</span><span class="p">,</span>
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">null_rate_max</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.05</span><span class="p">,</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="p">)</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">freshness_checked</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -1673,6 +1674,19 @@ within this fraction of its comparator's row count.</p>
             <td>
               <div class="doc-md-description">
                 <p>Sanity-check ceiling (ARCH §7.3) on the <code>value</code> column's null rate.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="bls_stats.registry.ProgramSpec.freshness_checked">freshness_checked</span></code></td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the ARCH §5.3 stale-file gate applies to this program's
+LABSTAT bulk file (<code>True</code> for ces/sae/jolts/cps/bed); <code>False</code> for qcew/oews/ep,
+whose sources don't serve a LABSTAT-style <code>Last-Modified</code> the probe understands.</p>
               </div>
             </td>
           </tr>

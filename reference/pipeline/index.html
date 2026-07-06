@@ -2055,15 +2055,7 @@ exercise the deferral path without live <code>Last-Modified</code> checks.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/bls_stats/pipeline.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-221">221</a></span>
-<span class="normal"><a href="#__codelineno-0-222">222</a></span>
-<span class="normal"><a href="#__codelineno-0-223">223</a></span>
-<span class="normal"><a href="#__codelineno-0-224">224</a></span>
-<span class="normal"><a href="#__codelineno-0-225">225</a></span>
-<span class="normal"><a href="#__codelineno-0-226">226</a></span>
-<span class="normal"><a href="#__codelineno-0-227">227</a></span>
-<span class="normal"><a href="#__codelineno-0-228">228</a></span>
-<span class="normal"><a href="#__codelineno-0-229">229</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-229">229</a></span>
 <span class="normal"><a href="#__codelineno-0-230">230</a></span>
 <span class="normal"><a href="#__codelineno-0-231">231</a></span>
 <span class="normal"><a href="#__codelineno-0-232">232</a></span>
@@ -2160,112 +2152,250 @@ exercise the deferral path without live <code>Last-Modified</code> checks.</p>
 <span class="normal"><a href="#__codelineno-0-323">323</a></span>
 <span class="normal"><a href="#__codelineno-0-324">324</a></span>
 <span class="normal"><a href="#__codelineno-0-325">325</a></span>
-<span class="normal"><a href="#__codelineno-0-326">326</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-221" name="__codelineno-0-221"></a><span class="k">def</span><span class="w"> </span><span class="nf">run_ingest</span><span class="p">(</span>
-<a id="__codelineno-0-222" name="__codelineno-0-222"></a>    <span class="n">settings</span><span class="p">:</span> <span class="n">Settings</span><span class="p">,</span>
-<a id="__codelineno-0-223" name="__codelineno-0-223"></a>    <span class="n">store</span><span class="p">:</span> <span class="n">Store</span><span class="p">,</span>
-<a id="__codelineno-0-224" name="__codelineno-0-224"></a>    <span class="n">programs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-225" name="__codelineno-0-225"></a>    <span class="o">*</span><span class="p">,</span>
-<a id="__codelineno-0-226" name="__codelineno-0-226"></a>    <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-0-227" name="__codelineno-0-227"></a>    <span class="n">clock</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[],</span> <span class="n">datetime</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-228" name="__codelineno-0-228"></a>    <span class="n">poll_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-229" name="__codelineno-0-229"></a>    <span class="n">fetch_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-230" name="__codelineno-0-230"></a>    <span class="n">fresh_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-231" name="__codelineno-0-231"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<a id="__codelineno-0-232" name="__codelineno-0-232"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Daily incremental ingest: detect → expand → fetch → validate → commit → record.</span>
-<a id="__codelineno-0-233" name="__codelineno-0-233"></a>
-<a id="__codelineno-0-234" name="__codelineno-0-234"></a><span class="sd">    The one daily crontab line (ARCH §8). Polls each program&#39;s release feed, expands new</span>
-<a id="__codelineno-0-235" name="__codelineno-0-235"></a><span class="sd">    releases into slots via `profiles.expand`, and drives each event through</span>
-<a id="__codelineno-0-236" name="__codelineno-0-236"></a><span class="sd">    `_process_event`. An event is skipped entirely if every one of its slots already</span>
-<a id="__codelineno-0-237" name="__codelineno-0-237"></a><span class="sd">    resolves to `&quot;ingested&quot;` or `&quot;missed&quot;` in the ledger — the anti-join that makes</span>
-<a id="__codelineno-0-238" name="__codelineno-0-238"></a><span class="sd">    re-running the whole ingest idempotent and safe as a dumb cron (ARCH §5.1, §7.2).</span>
-<a id="__codelineno-0-239" name="__codelineno-0-239"></a><span class="sd">    After an event that made forward progress (`_process_event` returns `&quot;ok&quot;`), any</span>
-<a id="__codelineno-0-240" name="__codelineno-0-240"></a><span class="sd">    older `deferred` slot for the same program that the new release&#39;s date has now</span>
-<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">    superseded is flipped to `&quot;missed&quot;` (ARCH §5.3) — never by wall-clock timeout.</span>
-<a id="__codelineno-0-242" name="__codelineno-0-242"></a>
-<a id="__codelineno-0-243" name="__codelineno-0-243"></a><span class="sd">    Crash safety: for each slot, data is appended to the Delta table before the ledger</span>
-<a id="__codelineno-0-244" name="__codelineno-0-244"></a><span class="sd">    records it, so the only crash-inconsistent state is &quot;committed, not yet recorded&quot; —</span>
-<a id="__codelineno-0-245" name="__codelineno-0-245"></a><span class="sd">    the safe direction. On re-run, `store.slot_exists` detects the already-committed slot</span>
-<a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="sd">    (null-safe on the backfill counters) and `_process_event` repairs the ledger without</span>
-<a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="sd">    re-appending (ARCH §7.2).</span>
-<a id="__codelineno-0-248" name="__codelineno-0-248"></a>
-<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">        settings: Environment-derived config used to build the HTTP client.</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">        store: Vintage store backend (Delta or the Parquet escape hatch).</span>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">        programs: Programs to poll; defaults to every registry program except `ep`,</span>
-<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">            which is not yet wired to the vintage store (ARCH §12). Passing `[&quot;ep&quot;]`</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">            explicitly (or an all-`ep` list) logs an error and returns `2` rather than</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a><span class="sd">            silently no-opping.</span>
-<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">        dry_run: If `True`, run the full pipeline including validation but skip both the</span>
-<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">            Delta append and the ledger write — nothing durable changes.</span>
-<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">        clock: Injected wall clock for `downloaded`/`ingested_at` timestamps; defaults to</span>
-<a id="__codelineno-0-259" name="__codelineno-0-259"></a><span class="sd">            `datetime.now(UTC)`. Tests pass a fixed clock so multi-run scenarios can</span>
-<a id="__codelineno-0-260" name="__codelineno-0-260"></a><span class="sd">            control ledger ordering deterministically.</span>
-<a id="__codelineno-0-261" name="__codelineno-0-261"></a><span class="sd">        poll_fn (Callable | None): Injected replacement for `feeds.poll(client, programs)`;</span>
-<a id="__codelineno-0-262" name="__codelineno-0-262"></a><span class="sd">            defaults to the live Atom-feed poller. Tests substitute a canned list of</span>
-<a id="__codelineno-0-263" name="__codelineno-0-263"></a><span class="sd">            `Release` events.</span>
-<a id="__codelineno-0-264" name="__codelineno-0-264"></a><span class="sd">        fetch_fn (Callable | None): Injected replacement for the per-event fetch dispatch</span>
-<a id="__codelineno-0-265" name="__codelineno-0-265"></a><span class="sd">            (default `_fetch_event`); tests substitute a fake that returns a fixed frame</span>
-<a id="__codelineno-0-266" name="__codelineno-0-266"></a><span class="sd">            or raises.</span>
-<a id="__codelineno-0-267" name="__codelineno-0-267"></a><span class="sd">        fresh_fn (Callable | None): Injected replacement for the stale-file guard (default</span>
-<a id="__codelineno-0-268" name="__codelineno-0-268"></a><span class="sd">            `engines.labstat.is_fresh`); tests substitute a fixed freshness verdict to</span>
-<a id="__codelineno-0-269" name="__codelineno-0-269"></a><span class="sd">            exercise the deferral path without live `Last-Modified` checks.</span>
-<a id="__codelineno-0-270" name="__codelineno-0-270"></a>
-<a id="__codelineno-0-271" name="__codelineno-0-271"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-272" name="__codelineno-0-272"></a><span class="sd">        Exit code per ARCH §7.4: `0` if there were no new events, or every event that ran</span>
-<a id="__codelineno-0-273" name="__codelineno-0-273"></a><span class="sd">        ended in `&quot;ok&quot;` or `&quot;deferred&quot;` (a benign lag — a stale upstream file or an empty</span>
-<a id="__codelineno-0-274" name="__codelineno-0-274"></a><span class="sd">        slice — never pages ops). `1` if at least one event `&quot;failed&quot;` but not all of them</span>
-<a id="__codelineno-0-275" name="__codelineno-0-275"></a><span class="sd">        did, or any event was `&quot;partial&quot;` (it raised after already appending data for some</span>
-<a id="__codelineno-0-276" name="__codelineno-0-276"></a><span class="sd">        of its slots — the commit happened, so this is not a clean failure and must not be</span>
-<a id="__codelineno-0-277" name="__codelineno-0-277"></a><span class="sd">        silently reported as success). `2` if every event that ran `&quot;failed&quot;` outright.</span>
-<a id="__codelineno-0-278" name="__codelineno-0-278"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-279" name="__codelineno-0-279"></a>    <span class="n">clock</span> <span class="o">=</span> <span class="n">clock</span> <span class="ow">or</span> <span class="n">_utcnow</span>
-<a id="__codelineno-0-280" name="__codelineno-0-280"></a>    <span class="n">programs</span> <span class="o">=</span> <span class="n">programs</span> <span class="ow">or</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">REGISTRY</span> <span class="k">if</span> <span class="n">p</span> <span class="o">!=</span> <span class="s2">&quot;ep&quot;</span><span class="p">]</span>  <span class="c1"># ep: ARCH §5.2 exception</span>
-<a id="__codelineno-0-281" name="__codelineno-0-281"></a>    <span class="k">if</span> <span class="s2">&quot;ep&quot;</span> <span class="ow">in</span> <span class="n">programs</span><span class="p">:</span>
-<a id="__codelineno-0-282" name="__codelineno-0-282"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;ep ingest is not yet wired to the vintage store (ARCH §12 open item)&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-283" name="__codelineno-0-283"></a>        <span class="n">programs</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">programs</span> <span class="k">if</span> <span class="n">p</span> <span class="o">!=</span> <span class="s2">&quot;ep&quot;</span><span class="p">]</span>
-<a id="__codelineno-0-284" name="__codelineno-0-284"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">programs</span><span class="p">:</span>
-<a id="__codelineno-0-285" name="__codelineno-0-285"></a>            <span class="k">return</span> <span class="mi">2</span>
-<a id="__codelineno-0-286" name="__codelineno-0-286"></a>    <span class="n">poll_fn</span> <span class="o">=</span> <span class="n">poll_fn</span> <span class="ow">or</span> <span class="n">feeds</span><span class="o">.</span><span class="n">poll</span>
-<a id="__codelineno-0-287" name="__codelineno-0-287"></a>    <span class="n">fetch_fn</span> <span class="o">=</span> <span class="n">fetch_fn</span> <span class="ow">or</span> <span class="n">_fetch_event</span>
-<a id="__codelineno-0-288" name="__codelineno-0-288"></a>    <span class="k">if</span> <span class="n">fresh_fn</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-289" name="__codelineno-0-289"></a>        <span class="kn">from</span><span class="w"> </span><span class="nn">bls_stats.engines.labstat</span><span class="w"> </span><span class="kn">import</span> <span class="n">is_fresh</span> <span class="k">as</span> <span class="n">fresh_fn</span>  <span class="c1"># noqa: PLW0127</span>
-<a id="__codelineno-0-290" name="__codelineno-0-290"></a>
-<a id="__codelineno-0-291" name="__codelineno-0-291"></a>    <span class="n">client</span> <span class="o">=</span> <span class="n">build_client</span><span class="p">(</span><span class="n">settings</span><span class="p">)</span>
-<a id="__codelineno-0-292" name="__codelineno-0-292"></a>    <span class="n">ledger</span> <span class="o">=</span> <span class="n">Ledger</span><span class="p">(</span><span class="n">store</span><span class="p">)</span>
-<a id="__codelineno-0-293" name="__codelineno-0-293"></a>    <span class="n">outcomes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-294" name="__codelineno-0-294"></a>    <span class="k">for</span> <span class="n">release</span> <span class="ow">in</span> <span class="n">poll_fn</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">programs</span><span class="p">):</span>
-<a id="__codelineno-0-295" name="__codelineno-0-295"></a>        <span class="n">slots</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-0-296" name="__codelineno-0-296"></a>            <span class="n">s</span>
-<a id="__codelineno-0-297" name="__codelineno-0-297"></a>            <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">expand</span><span class="p">(</span>
-<a id="__codelineno-0-298" name="__codelineno-0-298"></a>                <span class="n">release</span><span class="p">,</span>
-<a id="__codelineno-0-299" name="__codelineno-0-299"></a>                <span class="k">lambda</span> <span class="n">rd</span><span class="p">,</span> <span class="n">program</span><span class="o">=</span><span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">:</span> <span class="n">ledger</span><span class="o">.</span><span class="n">prior_benchmark_count</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">rd</span><span class="p">),</span>
-<a id="__codelineno-0-300" name="__codelineno-0-300"></a>            <span class="p">)</span>
-<a id="__codelineno-0-301" name="__codelineno-0-301"></a>            <span class="k">if</span> <span class="n">ledger</span><span class="o">.</span><span class="n">slot_status</span><span class="p">(</span>
-<a id="__codelineno-0-302" name="__codelineno-0-302"></a>                <span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">revision</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">benchmark</span>
-<a id="__codelineno-0-303" name="__codelineno-0-303"></a>            <span class="p">)</span>
-<a id="__codelineno-0-304" name="__codelineno-0-304"></a>            <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;ingested&quot;</span><span class="p">,</span> <span class="s2">&quot;missed&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-305" name="__codelineno-0-305"></a>        <span class="p">]</span>
-<a id="__codelineno-0-306" name="__codelineno-0-306"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">slots</span><span class="p">:</span>
-<a id="__codelineno-0-307" name="__codelineno-0-307"></a>            <span class="k">continue</span>
-<a id="__codelineno-0-308" name="__codelineno-0-308"></a>        <span class="n">outcome</span> <span class="o">=</span> <span class="n">_process_event</span><span class="p">(</span>
-<a id="__codelineno-0-309" name="__codelineno-0-309"></a>            <span class="n">release</span><span class="p">,</span>
-<a id="__codelineno-0-310" name="__codelineno-0-310"></a>            <span class="n">slots</span><span class="p">,</span>
-<a id="__codelineno-0-311" name="__codelineno-0-311"></a>            <span class="n">settings</span><span class="p">,</span>
-<a id="__codelineno-0-312" name="__codelineno-0-312"></a>            <span class="n">store</span><span class="p">,</span>
-<a id="__codelineno-0-313" name="__codelineno-0-313"></a>            <span class="n">ledger</span><span class="p">,</span>
-<a id="__codelineno-0-314" name="__codelineno-0-314"></a>            <span class="n">client</span><span class="p">,</span>
-<a id="__codelineno-0-315" name="__codelineno-0-315"></a>            <span class="n">dry_run</span><span class="o">=</span><span class="n">dry_run</span><span class="p">,</span>
-<a id="__codelineno-0-316" name="__codelineno-0-316"></a>            <span class="n">now</span><span class="o">=</span><span class="n">clock</span><span class="p">(),</span>
-<a id="__codelineno-0-317" name="__codelineno-0-317"></a>            <span class="n">fetch_fn</span><span class="o">=</span><span class="n">fetch_fn</span><span class="p">,</span>
-<a id="__codelineno-0-318" name="__codelineno-0-318"></a>            <span class="n">fresh_fn</span><span class="o">=</span><span class="n">fresh_fn</span><span class="p">,</span>
-<a id="__codelineno-0-319" name="__codelineno-0-319"></a>        <span class="p">)</span>
-<a id="__codelineno-0-320" name="__codelineno-0-320"></a>        <span class="k">if</span> <span class="n">outcome</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-321" name="__codelineno-0-321"></a>            <span class="n">_expire_superseded</span><span class="p">(</span><span class="n">ledger</span><span class="p">,</span> <span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span> <span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">,</span> <span class="n">clock</span><span class="p">(),</span> <span class="n">dry_run</span><span class="p">)</span>
-<a id="__codelineno-0-322" name="__codelineno-0-322"></a>        <span class="n">outcomes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">outcome</span><span class="p">)</span>
-<a id="__codelineno-0-323" name="__codelineno-0-323"></a>    <span class="n">failed</span> <span class="o">=</span> <span class="n">outcomes</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">&quot;failed&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-324" name="__codelineno-0-324"></a>    <span class="k">if</span> <span class="n">failed</span> <span class="ow">and</span> <span class="n">failed</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">outcomes</span><span class="p">):</span>
-<a id="__codelineno-0-325" name="__codelineno-0-325"></a>        <span class="k">return</span> <span class="mi">2</span>
-<a id="__codelineno-0-326" name="__codelineno-0-326"></a>    <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">failed</span> <span class="ow">or</span> <span class="s2">&quot;partial&quot;</span> <span class="ow">in</span> <span class="n">outcomes</span> <span class="k">else</span> <span class="mi">0</span>
+<span class="normal"><a href="#__codelineno-0-326">326</a></span>
+<span class="normal"><a href="#__codelineno-0-327">327</a></span>
+<span class="normal"><a href="#__codelineno-0-328">328</a></span>
+<span class="normal"><a href="#__codelineno-0-329">329</a></span>
+<span class="normal"><a href="#__codelineno-0-330">330</a></span>
+<span class="normal"><a href="#__codelineno-0-331">331</a></span>
+<span class="normal"><a href="#__codelineno-0-332">332</a></span>
+<span class="normal"><a href="#__codelineno-0-333">333</a></span>
+<span class="normal"><a href="#__codelineno-0-334">334</a></span>
+<span class="normal"><a href="#__codelineno-0-335">335</a></span>
+<span class="normal"><a href="#__codelineno-0-336">336</a></span>
+<span class="normal"><a href="#__codelineno-0-337">337</a></span>
+<span class="normal"><a href="#__codelineno-0-338">338</a></span>
+<span class="normal"><a href="#__codelineno-0-339">339</a></span>
+<span class="normal"><a href="#__codelineno-0-340">340</a></span>
+<span class="normal"><a href="#__codelineno-0-341">341</a></span>
+<span class="normal"><a href="#__codelineno-0-342">342</a></span>
+<span class="normal"><a href="#__codelineno-0-343">343</a></span>
+<span class="normal"><a href="#__codelineno-0-344">344</a></span>
+<span class="normal"><a href="#__codelineno-0-345">345</a></span>
+<span class="normal"><a href="#__codelineno-0-346">346</a></span>
+<span class="normal"><a href="#__codelineno-0-347">347</a></span>
+<span class="normal"><a href="#__codelineno-0-348">348</a></span>
+<span class="normal"><a href="#__codelineno-0-349">349</a></span>
+<span class="normal"><a href="#__codelineno-0-350">350</a></span>
+<span class="normal"><a href="#__codelineno-0-351">351</a></span>
+<span class="normal"><a href="#__codelineno-0-352">352</a></span>
+<span class="normal"><a href="#__codelineno-0-353">353</a></span>
+<span class="normal"><a href="#__codelineno-0-354">354</a></span>
+<span class="normal"><a href="#__codelineno-0-355">355</a></span>
+<span class="normal"><a href="#__codelineno-0-356">356</a></span>
+<span class="normal"><a href="#__codelineno-0-357">357</a></span>
+<span class="normal"><a href="#__codelineno-0-358">358</a></span>
+<span class="normal"><a href="#__codelineno-0-359">359</a></span>
+<span class="normal"><a href="#__codelineno-0-360">360</a></span>
+<span class="normal"><a href="#__codelineno-0-361">361</a></span>
+<span class="normal"><a href="#__codelineno-0-362">362</a></span>
+<span class="normal"><a href="#__codelineno-0-363">363</a></span>
+<span class="normal"><a href="#__codelineno-0-364">364</a></span>
+<span class="normal"><a href="#__codelineno-0-365">365</a></span>
+<span class="normal"><a href="#__codelineno-0-366">366</a></span>
+<span class="normal"><a href="#__codelineno-0-367">367</a></span>
+<span class="normal"><a href="#__codelineno-0-368">368</a></span>
+<span class="normal"><a href="#__codelineno-0-369">369</a></span>
+<span class="normal"><a href="#__codelineno-0-370">370</a></span>
+<span class="normal"><a href="#__codelineno-0-371">371</a></span>
+<span class="normal"><a href="#__codelineno-0-372">372</a></span>
+<span class="normal"><a href="#__codelineno-0-373">373</a></span>
+<span class="normal"><a href="#__codelineno-0-374">374</a></span>
+<span class="normal"><a href="#__codelineno-0-375">375</a></span>
+<span class="normal"><a href="#__codelineno-0-376">376</a></span>
+<span class="normal"><a href="#__codelineno-0-377">377</a></span>
+<span class="normal"><a href="#__codelineno-0-378">378</a></span>
+<span class="normal"><a href="#__codelineno-0-379">379</a></span>
+<span class="normal"><a href="#__codelineno-0-380">380</a></span>
+<span class="normal"><a href="#__codelineno-0-381">381</a></span>
+<span class="normal"><a href="#__codelineno-0-382">382</a></span>
+<span class="normal"><a href="#__codelineno-0-383">383</a></span>
+<span class="normal"><a href="#__codelineno-0-384">384</a></span>
+<span class="normal"><a href="#__codelineno-0-385">385</a></span>
+<span class="normal"><a href="#__codelineno-0-386">386</a></span>
+<span class="normal"><a href="#__codelineno-0-387">387</a></span>
+<span class="normal"><a href="#__codelineno-0-388">388</a></span>
+<span class="normal"><a href="#__codelineno-0-389">389</a></span>
+<span class="normal"><a href="#__codelineno-0-390">390</a></span>
+<span class="normal"><a href="#__codelineno-0-391">391</a></span>
+<span class="normal"><a href="#__codelineno-0-392">392</a></span>
+<span class="normal"><a href="#__codelineno-0-393">393</a></span>
+<span class="normal"><a href="#__codelineno-0-394">394</a></span>
+<span class="normal"><a href="#__codelineno-0-395">395</a></span>
+<span class="normal"><a href="#__codelineno-0-396">396</a></span>
+<span class="normal"><a href="#__codelineno-0-397">397</a></span>
+<span class="normal"><a href="#__codelineno-0-398">398</a></span>
+<span class="normal"><a href="#__codelineno-0-399">399</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-229" name="__codelineno-0-229"></a><span class="k">def</span><span class="w"> </span><span class="nf">run_ingest</span><span class="p">(</span>
+<a id="__codelineno-0-230" name="__codelineno-0-230"></a>    <span class="n">settings</span><span class="p">:</span> <span class="n">Settings</span><span class="p">,</span>
+<a id="__codelineno-0-231" name="__codelineno-0-231"></a>    <span class="n">store</span><span class="p">:</span> <span class="n">Store</span><span class="p">,</span>
+<a id="__codelineno-0-232" name="__codelineno-0-232"></a>    <span class="n">programs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-233" name="__codelineno-0-233"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-234" name="__codelineno-0-234"></a>    <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-235" name="__codelineno-0-235"></a>    <span class="n">clock</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[],</span> <span class="n">datetime</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-236" name="__codelineno-0-236"></a>    <span class="n">poll_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-237" name="__codelineno-0-237"></a>    <span class="n">fetch_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-238" name="__codelineno-0-238"></a>    <span class="n">fresh_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-239" name="__codelineno-0-239"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<a id="__codelineno-0-240" name="__codelineno-0-240"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Daily incremental ingest: detect → expand → fetch → validate → commit → record.</span>
+<a id="__codelineno-0-241" name="__codelineno-0-241"></a>
+<a id="__codelineno-0-242" name="__codelineno-0-242"></a><span class="sd">    The one daily crontab line (ARCH §8). Polls each program&#39;s release feed, expands new</span>
+<a id="__codelineno-0-243" name="__codelineno-0-243"></a><span class="sd">    releases into slots via `profiles.expand`, and drives each event through</span>
+<a id="__codelineno-0-244" name="__codelineno-0-244"></a><span class="sd">    `_process_event`. An event is skipped entirely if every one of its slots already</span>
+<a id="__codelineno-0-245" name="__codelineno-0-245"></a><span class="sd">    resolves to `&quot;ingested&quot;` or `&quot;missed&quot;` in the ledger — the anti-join that makes</span>
+<a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="sd">    re-running the whole ingest idempotent and safe as a dumb cron (ARCH §5.1, §7.2).</span>
+<a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="sd">    After an event that made forward progress (`_process_event` returns `&quot;ok&quot;`), any</span>
+<a id="__codelineno-0-248" name="__codelineno-0-248"></a><span class="sd">    older `deferred` slot for the same program that the new release&#39;s date has now</span>
+<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">    superseded is flipped to `&quot;missed&quot;` (ARCH §5.3) — never by wall-clock timeout.</span>
+<a id="__codelineno-0-250" name="__codelineno-0-250"></a>
+<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">    Crash safety: for each slot, data is appended to the Delta table before the ledger</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">    records it, so the only crash-inconsistent state is &quot;committed, not yet recorded&quot; —</span>
+<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">    the safe direction. On re-run, `store.slot_exists` detects the already-committed slot</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">    (null-safe on the backfill counters) and `_process_event` repairs the ledger without</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a><span class="sd">    re-appending (ARCH §7.2).</span>
+<a id="__codelineno-0-256" name="__codelineno-0-256"></a>
+<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">        settings: Environment-derived config used to build the HTTP client.</span>
+<a id="__codelineno-0-259" name="__codelineno-0-259"></a><span class="sd">        store: Vintage store backend (Delta or the Parquet escape hatch).</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a><span class="sd">        programs: Programs to poll; defaults to every registry program except `ep`,</span>
+<a id="__codelineno-0-261" name="__codelineno-0-261"></a><span class="sd">            which is not yet wired to the vintage store (ARCH §12). Passing `[&quot;ep&quot;]`</span>
+<a id="__codelineno-0-262" name="__codelineno-0-262"></a><span class="sd">            explicitly (or an all-`ep` list) logs an error and returns `2` rather than</span>
+<a id="__codelineno-0-263" name="__codelineno-0-263"></a><span class="sd">            silently no-opping.</span>
+<a id="__codelineno-0-264" name="__codelineno-0-264"></a><span class="sd">        dry_run: If `True`, run the full pipeline including validation but skip both the</span>
+<a id="__codelineno-0-265" name="__codelineno-0-265"></a><span class="sd">            Delta append and the ledger write — nothing durable changes.</span>
+<a id="__codelineno-0-266" name="__codelineno-0-266"></a><span class="sd">        clock: Injected wall clock for `downloaded`/`ingested_at` timestamps; defaults to</span>
+<a id="__codelineno-0-267" name="__codelineno-0-267"></a><span class="sd">            `datetime.now(UTC)`. Tests pass a fixed clock so multi-run scenarios can</span>
+<a id="__codelineno-0-268" name="__codelineno-0-268"></a><span class="sd">            control ledger ordering deterministically.</span>
+<a id="__codelineno-0-269" name="__codelineno-0-269"></a><span class="sd">        poll_fn (Callable | None): Injected replacement for `feeds.poll(client, programs)`;</span>
+<a id="__codelineno-0-270" name="__codelineno-0-270"></a><span class="sd">            defaults to the live Atom-feed poller. Tests substitute a canned list of</span>
+<a id="__codelineno-0-271" name="__codelineno-0-271"></a><span class="sd">            `Release` events.</span>
+<a id="__codelineno-0-272" name="__codelineno-0-272"></a><span class="sd">        fetch_fn (Callable | None): Injected replacement for the per-event fetch dispatch</span>
+<a id="__codelineno-0-273" name="__codelineno-0-273"></a><span class="sd">            (default `_fetch_event`); tests substitute a fake that returns a fixed frame</span>
+<a id="__codelineno-0-274" name="__codelineno-0-274"></a><span class="sd">            or raises.</span>
+<a id="__codelineno-0-275" name="__codelineno-0-275"></a><span class="sd">        fresh_fn (Callable | None): Injected replacement for the stale-file guard (default</span>
+<a id="__codelineno-0-276" name="__codelineno-0-276"></a><span class="sd">            `engines.labstat.is_fresh`); tests substitute a fixed freshness verdict to</span>
+<a id="__codelineno-0-277" name="__codelineno-0-277"></a><span class="sd">            exercise the deferral path without live `Last-Modified` checks.</span>
+<a id="__codelineno-0-278" name="__codelineno-0-278"></a>
+<a id="__codelineno-0-279" name="__codelineno-0-279"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-280" name="__codelineno-0-280"></a><span class="sd">        Exit code per ARCH §7.4: `0` if there were no new events, or every event that ran</span>
+<a id="__codelineno-0-281" name="__codelineno-0-281"></a><span class="sd">        ended in `&quot;ok&quot;` or `&quot;deferred&quot;` (a benign lag — a stale upstream file or an empty</span>
+<a id="__codelineno-0-282" name="__codelineno-0-282"></a><span class="sd">        slice — never pages ops). `1` if at least one event `&quot;failed&quot;` but not all of them</span>
+<a id="__codelineno-0-283" name="__codelineno-0-283"></a><span class="sd">        did, or any event was `&quot;partial&quot;` (it raised after already appending data for some</span>
+<a id="__codelineno-0-284" name="__codelineno-0-284"></a><span class="sd">        of its slots — the commit happened, so this is not a clean failure and must not be</span>
+<a id="__codelineno-0-285" name="__codelineno-0-285"></a><span class="sd">        silently reported as success). `2` if every event that ran `&quot;failed&quot;` outright.</span>
+<a id="__codelineno-0-286" name="__codelineno-0-286"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-287" name="__codelineno-0-287"></a>    <span class="n">clock</span> <span class="o">=</span> <span class="n">clock</span> <span class="ow">or</span> <span class="n">_utcnow</span>
+<a id="__codelineno-0-288" name="__codelineno-0-288"></a>    <span class="n">programs</span> <span class="o">=</span> <span class="n">programs</span> <span class="ow">or</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">REGISTRY</span> <span class="k">if</span> <span class="n">p</span> <span class="o">!=</span> <span class="s2">&quot;ep&quot;</span><span class="p">]</span>  <span class="c1"># ep: ARCH §5.2 exception</span>
+<a id="__codelineno-0-289" name="__codelineno-0-289"></a>    <span class="k">if</span> <span class="s2">&quot;ep&quot;</span> <span class="ow">in</span> <span class="n">programs</span><span class="p">:</span>
+<a id="__codelineno-0-290" name="__codelineno-0-290"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;ep ingest is not yet wired to the vintage store (ARCH §12 open item)&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-291" name="__codelineno-0-291"></a>        <span class="n">programs</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">programs</span> <span class="k">if</span> <span class="n">p</span> <span class="o">!=</span> <span class="s2">&quot;ep&quot;</span><span class="p">]</span>
+<a id="__codelineno-0-292" name="__codelineno-0-292"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">programs</span><span class="p">:</span>
+<a id="__codelineno-0-293" name="__codelineno-0-293"></a>            <span class="k">return</span> <span class="mi">2</span>
+<a id="__codelineno-0-294" name="__codelineno-0-294"></a>    <span class="n">poll_fn</span> <span class="o">=</span> <span class="n">poll_fn</span> <span class="ow">or</span> <span class="n">feeds</span><span class="o">.</span><span class="n">poll</span>
+<a id="__codelineno-0-295" name="__codelineno-0-295"></a>    <span class="n">fetch_fn</span> <span class="o">=</span> <span class="n">fetch_fn</span> <span class="ow">or</span> <span class="n">_fetch_event</span>
+<a id="__codelineno-0-296" name="__codelineno-0-296"></a>    <span class="k">if</span> <span class="n">fresh_fn</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-297" name="__codelineno-0-297"></a>        <span class="kn">from</span><span class="w"> </span><span class="nn">bls_stats.engines.labstat</span><span class="w"> </span><span class="kn">import</span> <span class="n">is_fresh</span> <span class="k">as</span> <span class="n">fresh_fn</span>  <span class="c1"># noqa: PLW0127</span>
+<a id="__codelineno-0-298" name="__codelineno-0-298"></a>
+<a id="__codelineno-0-299" name="__codelineno-0-299"></a>    <span class="n">client</span> <span class="o">=</span> <span class="n">build_client</span><span class="p">(</span><span class="n">settings</span><span class="p">)</span>
+<a id="__codelineno-0-300" name="__codelineno-0-300"></a>    <span class="n">ledger</span> <span class="o">=</span> <span class="n">Ledger</span><span class="p">(</span><span class="n">store</span><span class="p">)</span>
+<a id="__codelineno-0-301" name="__codelineno-0-301"></a>    <span class="n">outcomes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-302" name="__codelineno-0-302"></a>    <span class="n">releases</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">poll_fn</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">programs</span><span class="p">))</span>
+<a id="__codelineno-0-303" name="__codelineno-0-303"></a>    <span class="n">newest_in_batch</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">date</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-304" name="__codelineno-0-304"></a>    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">releases</span><span class="p">:</span>
+<a id="__codelineno-0-305" name="__codelineno-0-305"></a>        <span class="n">d</span> <span class="o">=</span> <span class="n">newest_in_batch</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">program</span><span class="p">)</span>
+<a id="__codelineno-0-306" name="__codelineno-0-306"></a>        <span class="k">if</span> <span class="n">d</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">r</span><span class="o">.</span><span class="n">release_date</span> <span class="o">&gt;</span> <span class="n">d</span><span class="p">:</span>
+<a id="__codelineno-0-307" name="__codelineno-0-307"></a>            <span class="n">newest_in_batch</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">program</span><span class="p">]</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">release_date</span>
+<a id="__codelineno-0-308" name="__codelineno-0-308"></a>    <span class="n">resolved</span> <span class="o">=</span> <span class="n">ledger</span><span class="o">.</span><span class="n">resolved</span><span class="p">()</span>
+<a id="__codelineno-0-309" name="__codelineno-0-309"></a>
+<a id="__codelineno-0-310" name="__codelineno-0-310"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_is_backdated</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<a id="__codelineno-0-311" name="__codelineno-0-311"></a>        <span class="c1"># A strictly-newer release for this program in the batch, or already ingested,</span>
+<a id="__codelineno-0-312" name="__codelineno-0-312"></a>        <span class="c1"># means r&#39;s live-vintage window has closed — the current file no longer reflects</span>
+<a id="__codelineno-0-313" name="__codelineno-0-313"></a>        <span class="c1"># what r published, so fetching it would fabricate a print (ARCH §2.1 / C-14).</span>
+<a id="__codelineno-0-314" name="__codelineno-0-314"></a>        <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">release_date</span> <span class="o">&lt;</span> <span class="n">newest_in_batch</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">program</span><span class="p">]:</span>
+<a id="__codelineno-0-315" name="__codelineno-0-315"></a>            <span class="k">return</span> <span class="kc">True</span>
+<a id="__codelineno-0-316" name="__codelineno-0-316"></a>        <span class="n">ingested</span> <span class="o">=</span> <span class="n">resolved</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span>
+<a id="__codelineno-0-317" name="__codelineno-0-317"></a>            <span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;program&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">r</span><span class="o">.</span><span class="n">program</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;ingested&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-318" name="__codelineno-0-318"></a>        <span class="p">)</span>
+<a id="__codelineno-0-319" name="__codelineno-0-319"></a>        <span class="n">latest</span> <span class="o">=</span> <span class="n">ingested</span><span class="p">[</span><span class="s2">&quot;release_date&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+<a id="__codelineno-0-320" name="__codelineno-0-320"></a>        <span class="k">return</span> <span class="n">latest</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">r</span><span class="o">.</span><span class="n">release_date</span> <span class="o">&lt;</span> <span class="n">latest</span>
+<a id="__codelineno-0-321" name="__codelineno-0-321"></a>
+<a id="__codelineno-0-322" name="__codelineno-0-322"></a>    <span class="k">for</span> <span class="n">release</span> <span class="ow">in</span> <span class="n">releases</span><span class="p">:</span>
+<a id="__codelineno-0-323" name="__codelineno-0-323"></a>        <span class="k">if</span> <span class="n">_is_backdated</span><span class="p">(</span><span class="n">release</span><span class="p">):</span>
+<a id="__codelineno-0-324" name="__codelineno-0-324"></a>            <span class="c1"># Record only not-yet-resolved slots as missed. Never downgrade an already-</span>
+<a id="__codelineno-0-325" name="__codelineno-0-325"></a>            <span class="c1"># ingested slot: a correct live-vintage print stays ingested forever (ARCH §5.3,</span>
+<a id="__codelineno-0-326" name="__codelineno-0-326"></a>            <span class="c1"># _expire_superseded only expires deferred slots), and re-polling a back-dated</span>
+<a id="__codelineno-0-327" name="__codelineno-0-327"></a>            <span class="c1"># release must be idempotent — the same guard the live branch below uses.</span>
+<a id="__codelineno-0-328" name="__codelineno-0-328"></a>            <span class="n">missed_slots</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-329" name="__codelineno-0-329"></a>                <span class="n">s</span>
+<a id="__codelineno-0-330" name="__codelineno-0-330"></a>                <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">expand</span><span class="p">(</span>
+<a id="__codelineno-0-331" name="__codelineno-0-331"></a>                    <span class="n">release</span><span class="p">,</span>
+<a id="__codelineno-0-332" name="__codelineno-0-332"></a>                    <span class="k">lambda</span> <span class="n">rd</span><span class="p">,</span> <span class="n">program</span><span class="o">=</span><span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span> <span class="n">before</span><span class="o">=</span><span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">:</span> <span class="p">(</span>
+<a id="__codelineno-0-333" name="__codelineno-0-333"></a>                        <span class="n">ledger</span><span class="o">.</span><span class="n">prior_benchmark_count</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">rd</span><span class="p">,</span> <span class="n">before_release</span><span class="o">=</span><span class="n">before</span><span class="p">)</span>
+<a id="__codelineno-0-334" name="__codelineno-0-334"></a>                    <span class="p">),</span>
+<a id="__codelineno-0-335" name="__codelineno-0-335"></a>                <span class="p">)</span>
+<a id="__codelineno-0-336" name="__codelineno-0-336"></a>                <span class="k">if</span> <span class="n">ledger</span><span class="o">.</span><span class="n">slot_status</span><span class="p">(</span>
+<a id="__codelineno-0-337" name="__codelineno-0-337"></a>                    <span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">revision</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">benchmark</span>
+<a id="__codelineno-0-338" name="__codelineno-0-338"></a>                <span class="p">)</span>
+<a id="__codelineno-0-339" name="__codelineno-0-339"></a>                <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;ingested&quot;</span><span class="p">,</span> <span class="s2">&quot;missed&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-340" name="__codelineno-0-340"></a>            <span class="p">]</span>
+<a id="__codelineno-0-341" name="__codelineno-0-341"></a>            <span class="k">if</span> <span class="n">missed_slots</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">dry_run</span><span class="p">:</span>
+<a id="__codelineno-0-342" name="__codelineno-0-342"></a>                <span class="n">ledger</span><span class="o">.</span><span class="n">record</span><span class="p">(</span>
+<a id="__codelineno-0-343" name="__codelineno-0-343"></a>                    <span class="p">[</span>
+<a id="__codelineno-0-344" name="__codelineno-0-344"></a>                        <span class="n">SlotRecord</span><span class="p">(</span>
+<a id="__codelineno-0-345" name="__codelineno-0-345"></a>                            <span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span>
+<a id="__codelineno-0-346" name="__codelineno-0-346"></a>                            <span class="n">s</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span>
+<a id="__codelineno-0-347" name="__codelineno-0-347"></a>                            <span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">,</span>
+<a id="__codelineno-0-348" name="__codelineno-0-348"></a>                            <span class="n">s</span><span class="o">.</span><span class="n">revision</span><span class="p">,</span>
+<a id="__codelineno-0-349" name="__codelineno-0-349"></a>                            <span class="n">s</span><span class="o">.</span><span class="n">benchmark</span><span class="p">,</span>
+<a id="__codelineno-0-350" name="__codelineno-0-350"></a>                            <span class="s2">&quot;increment&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-351" name="__codelineno-0-351"></a>                            <span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-0-352" name="__codelineno-0-352"></a>                            <span class="s2">&quot;missed&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-353" name="__codelineno-0-353"></a>                            <span class="n">clock</span><span class="p">(),</span>
+<a id="__codelineno-0-354" name="__codelineno-0-354"></a>                        <span class="p">)</span>
+<a id="__codelineno-0-355" name="__codelineno-0-355"></a>                        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">missed_slots</span>
+<a id="__codelineno-0-356" name="__codelineno-0-356"></a>                    <span class="p">]</span>
+<a id="__codelineno-0-357" name="__codelineno-0-357"></a>                <span class="p">)</span>
+<a id="__codelineno-0-358" name="__codelineno-0-358"></a>            <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+<a id="__codelineno-0-359" name="__codelineno-0-359"></a>                <span class="s2">&quot;</span><span class="si">%s</span><span class="s2"> release </span><span class="si">%s</span><span class="s2"> is back-dated (a newer release exists) — not fetched; &quot;</span>
+<a id="__codelineno-0-360" name="__codelineno-0-360"></a>                <span class="s2">&quot;recorded </span><span class="si">%d</span><span class="s2"> new slot(s) missed, use `backfill` for history (C-14)&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-361" name="__codelineno-0-361"></a>                <span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span>
+<a id="__codelineno-0-362" name="__codelineno-0-362"></a>                <span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">,</span>
+<a id="__codelineno-0-363" name="__codelineno-0-363"></a>                <span class="nb">len</span><span class="p">(</span><span class="n">missed_slots</span><span class="p">),</span>
+<a id="__codelineno-0-364" name="__codelineno-0-364"></a>            <span class="p">)</span>
+<a id="__codelineno-0-365" name="__codelineno-0-365"></a>            <span class="k">continue</span>
+<a id="__codelineno-0-366" name="__codelineno-0-366"></a>        <span class="n">slots</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-367" name="__codelineno-0-367"></a>            <span class="n">s</span>
+<a id="__codelineno-0-368" name="__codelineno-0-368"></a>            <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">expand</span><span class="p">(</span>
+<a id="__codelineno-0-369" name="__codelineno-0-369"></a>                <span class="n">release</span><span class="p">,</span>
+<a id="__codelineno-0-370" name="__codelineno-0-370"></a>                <span class="k">lambda</span> <span class="n">rd</span><span class="p">,</span> <span class="n">program</span><span class="o">=</span><span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span> <span class="n">before</span><span class="o">=</span><span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">:</span> <span class="p">(</span>
+<a id="__codelineno-0-371" name="__codelineno-0-371"></a>                    <span class="n">ledger</span><span class="o">.</span><span class="n">prior_benchmark_count</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">rd</span><span class="p">,</span> <span class="n">before_release</span><span class="o">=</span><span class="n">before</span><span class="p">)</span>
+<a id="__codelineno-0-372" name="__codelineno-0-372"></a>                <span class="p">),</span>
+<a id="__codelineno-0-373" name="__codelineno-0-373"></a>            <span class="p">)</span>
+<a id="__codelineno-0-374" name="__codelineno-0-374"></a>            <span class="k">if</span> <span class="n">ledger</span><span class="o">.</span><span class="n">slot_status</span><span class="p">(</span>
+<a id="__codelineno-0-375" name="__codelineno-0-375"></a>                <span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">revision</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">benchmark</span>
+<a id="__codelineno-0-376" name="__codelineno-0-376"></a>            <span class="p">)</span>
+<a id="__codelineno-0-377" name="__codelineno-0-377"></a>            <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;ingested&quot;</span><span class="p">,</span> <span class="s2">&quot;missed&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-378" name="__codelineno-0-378"></a>        <span class="p">]</span>
+<a id="__codelineno-0-379" name="__codelineno-0-379"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">slots</span><span class="p">:</span>
+<a id="__codelineno-0-380" name="__codelineno-0-380"></a>            <span class="k">continue</span>
+<a id="__codelineno-0-381" name="__codelineno-0-381"></a>        <span class="n">outcome</span> <span class="o">=</span> <span class="n">_process_event</span><span class="p">(</span>
+<a id="__codelineno-0-382" name="__codelineno-0-382"></a>            <span class="n">release</span><span class="p">,</span>
+<a id="__codelineno-0-383" name="__codelineno-0-383"></a>            <span class="n">slots</span><span class="p">,</span>
+<a id="__codelineno-0-384" name="__codelineno-0-384"></a>            <span class="n">settings</span><span class="p">,</span>
+<a id="__codelineno-0-385" name="__codelineno-0-385"></a>            <span class="n">store</span><span class="p">,</span>
+<a id="__codelineno-0-386" name="__codelineno-0-386"></a>            <span class="n">ledger</span><span class="p">,</span>
+<a id="__codelineno-0-387" name="__codelineno-0-387"></a>            <span class="n">client</span><span class="p">,</span>
+<a id="__codelineno-0-388" name="__codelineno-0-388"></a>            <span class="n">dry_run</span><span class="o">=</span><span class="n">dry_run</span><span class="p">,</span>
+<a id="__codelineno-0-389" name="__codelineno-0-389"></a>            <span class="n">now</span><span class="o">=</span><span class="n">clock</span><span class="p">(),</span>
+<a id="__codelineno-0-390" name="__codelineno-0-390"></a>            <span class="n">fetch_fn</span><span class="o">=</span><span class="n">fetch_fn</span><span class="p">,</span>
+<a id="__codelineno-0-391" name="__codelineno-0-391"></a>            <span class="n">fresh_fn</span><span class="o">=</span><span class="n">fresh_fn</span><span class="p">,</span>
+<a id="__codelineno-0-392" name="__codelineno-0-392"></a>        <span class="p">)</span>
+<a id="__codelineno-0-393" name="__codelineno-0-393"></a>        <span class="k">if</span> <span class="n">outcome</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-394" name="__codelineno-0-394"></a>            <span class="n">_expire_superseded</span><span class="p">(</span><span class="n">ledger</span><span class="p">,</span> <span class="n">release</span><span class="o">.</span><span class="n">program</span><span class="p">,</span> <span class="n">release</span><span class="o">.</span><span class="n">release_date</span><span class="p">,</span> <span class="n">clock</span><span class="p">(),</span> <span class="n">dry_run</span><span class="p">)</span>
+<a id="__codelineno-0-395" name="__codelineno-0-395"></a>        <span class="n">outcomes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">outcome</span><span class="p">)</span>
+<a id="__codelineno-0-396" name="__codelineno-0-396"></a>    <span class="n">failed</span> <span class="o">=</span> <span class="n">outcomes</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">&quot;failed&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-397" name="__codelineno-0-397"></a>    <span class="k">if</span> <span class="n">failed</span> <span class="ow">and</span> <span class="n">failed</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">outcomes</span><span class="p">):</span>
+<a id="__codelineno-0-398" name="__codelineno-0-398"></a>        <span class="k">return</span> <span class="mi">2</span>
+<a id="__codelineno-0-399" name="__codelineno-0-399"></a>    <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">failed</span> <span class="ow">or</span> <span class="s2">&quot;partial&quot;</span> <span class="ow">in</span> <span class="n">outcomes</span> <span class="k">else</span> <span class="mi">0</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2418,8 +2548,8 @@ to backfill (it is snapshot/cycle-based, not periodic).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>True</code>, fetch and validate but skip both the Delta append and the
-ledger write.</p>
+                <p>If <code>True</code>, fetch and stamp but skip both the Delta append and the ledger
+write (backfill does not run the ingest validation gates — ARCH §7.3).</p>
               </div>
             </td>
             <td>
@@ -2529,79 +2659,7 @@ itself; defaults to <code>datetime.now(UTC)</code>.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/bls_stats/pipeline.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-420">420</a></span>
-<span class="normal"><a href="#__codelineno-0-421">421</a></span>
-<span class="normal"><a href="#__codelineno-0-422">422</a></span>
-<span class="normal"><a href="#__codelineno-0-423">423</a></span>
-<span class="normal"><a href="#__codelineno-0-424">424</a></span>
-<span class="normal"><a href="#__codelineno-0-425">425</a></span>
-<span class="normal"><a href="#__codelineno-0-426">426</a></span>
-<span class="normal"><a href="#__codelineno-0-427">427</a></span>
-<span class="normal"><a href="#__codelineno-0-428">428</a></span>
-<span class="normal"><a href="#__codelineno-0-429">429</a></span>
-<span class="normal"><a href="#__codelineno-0-430">430</a></span>
-<span class="normal"><a href="#__codelineno-0-431">431</a></span>
-<span class="normal"><a href="#__codelineno-0-432">432</a></span>
-<span class="normal"><a href="#__codelineno-0-433">433</a></span>
-<span class="normal"><a href="#__codelineno-0-434">434</a></span>
-<span class="normal"><a href="#__codelineno-0-435">435</a></span>
-<span class="normal"><a href="#__codelineno-0-436">436</a></span>
-<span class="normal"><a href="#__codelineno-0-437">437</a></span>
-<span class="normal"><a href="#__codelineno-0-438">438</a></span>
-<span class="normal"><a href="#__codelineno-0-439">439</a></span>
-<span class="normal"><a href="#__codelineno-0-440">440</a></span>
-<span class="normal"><a href="#__codelineno-0-441">441</a></span>
-<span class="normal"><a href="#__codelineno-0-442">442</a></span>
-<span class="normal"><a href="#__codelineno-0-443">443</a></span>
-<span class="normal"><a href="#__codelineno-0-444">444</a></span>
-<span class="normal"><a href="#__codelineno-0-445">445</a></span>
-<span class="normal"><a href="#__codelineno-0-446">446</a></span>
-<span class="normal"><a href="#__codelineno-0-447">447</a></span>
-<span class="normal"><a href="#__codelineno-0-448">448</a></span>
-<span class="normal"><a href="#__codelineno-0-449">449</a></span>
-<span class="normal"><a href="#__codelineno-0-450">450</a></span>
-<span class="normal"><a href="#__codelineno-0-451">451</a></span>
-<span class="normal"><a href="#__codelineno-0-452">452</a></span>
-<span class="normal"><a href="#__codelineno-0-453">453</a></span>
-<span class="normal"><a href="#__codelineno-0-454">454</a></span>
-<span class="normal"><a href="#__codelineno-0-455">455</a></span>
-<span class="normal"><a href="#__codelineno-0-456">456</a></span>
-<span class="normal"><a href="#__codelineno-0-457">457</a></span>
-<span class="normal"><a href="#__codelineno-0-458">458</a></span>
-<span class="normal"><a href="#__codelineno-0-459">459</a></span>
-<span class="normal"><a href="#__codelineno-0-460">460</a></span>
-<span class="normal"><a href="#__codelineno-0-461">461</a></span>
-<span class="normal"><a href="#__codelineno-0-462">462</a></span>
-<span class="normal"><a href="#__codelineno-0-463">463</a></span>
-<span class="normal"><a href="#__codelineno-0-464">464</a></span>
-<span class="normal"><a href="#__codelineno-0-465">465</a></span>
-<span class="normal"><a href="#__codelineno-0-466">466</a></span>
-<span class="normal"><a href="#__codelineno-0-467">467</a></span>
-<span class="normal"><a href="#__codelineno-0-468">468</a></span>
-<span class="normal"><a href="#__codelineno-0-469">469</a></span>
-<span class="normal"><a href="#__codelineno-0-470">470</a></span>
-<span class="normal"><a href="#__codelineno-0-471">471</a></span>
-<span class="normal"><a href="#__codelineno-0-472">472</a></span>
-<span class="normal"><a href="#__codelineno-0-473">473</a></span>
-<span class="normal"><a href="#__codelineno-0-474">474</a></span>
-<span class="normal"><a href="#__codelineno-0-475">475</a></span>
-<span class="normal"><a href="#__codelineno-0-476">476</a></span>
-<span class="normal"><a href="#__codelineno-0-477">477</a></span>
-<span class="normal"><a href="#__codelineno-0-478">478</a></span>
-<span class="normal"><a href="#__codelineno-0-479">479</a></span>
-<span class="normal"><a href="#__codelineno-0-480">480</a></span>
-<span class="normal"><a href="#__codelineno-0-481">481</a></span>
-<span class="normal"><a href="#__codelineno-0-482">482</a></span>
-<span class="normal"><a href="#__codelineno-0-483">483</a></span>
-<span class="normal"><a href="#__codelineno-0-484">484</a></span>
-<span class="normal"><a href="#__codelineno-0-485">485</a></span>
-<span class="normal"><a href="#__codelineno-0-486">486</a></span>
-<span class="normal"><a href="#__codelineno-0-487">487</a></span>
-<span class="normal"><a href="#__codelineno-0-488">488</a></span>
-<span class="normal"><a href="#__codelineno-0-489">489</a></span>
-<span class="normal"><a href="#__codelineno-0-490">490</a></span>
-<span class="normal"><a href="#__codelineno-0-491">491</a></span>
-<span class="normal"><a href="#__codelineno-0-492">492</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-492">492</a></span>
 <span class="normal"><a href="#__codelineno-0-493">493</a></span>
 <span class="normal"><a href="#__codelineno-0-494">494</a></span>
 <span class="normal"><a href="#__codelineno-0-495">495</a></span>
@@ -2636,114 +2694,188 @@ itself; defaults to <code>datetime.now(UTC)</code>.</p>
 <span class="normal"><a href="#__codelineno-0-524">524</a></span>
 <span class="normal"><a href="#__codelineno-0-525">525</a></span>
 <span class="normal"><a href="#__codelineno-0-526">526</a></span>
-<span class="normal"><a href="#__codelineno-0-527">527</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-420" name="__codelineno-0-420"></a><span class="k">def</span><span class="w"> </span><span class="nf">run_backfill</span><span class="p">(</span>
-<a id="__codelineno-0-421" name="__codelineno-0-421"></a>    <span class="n">settings</span><span class="p">:</span> <span class="n">Settings</span><span class="p">,</span>
-<a id="__codelineno-0-422" name="__codelineno-0-422"></a>    <span class="n">store</span><span class="p">:</span> <span class="n">Store</span><span class="p">,</span>
-<a id="__codelineno-0-423" name="__codelineno-0-423"></a>    <span class="n">program</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-424" name="__codelineno-0-424"></a>    <span class="n">start</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-425" name="__codelineno-0-425"></a>    <span class="n">end</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-426" name="__codelineno-0-426"></a>    <span class="o">*</span><span class="p">,</span>
-<a id="__codelineno-0-427" name="__codelineno-0-427"></a>    <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-0-428" name="__codelineno-0-428"></a>    <span class="n">clock</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[],</span> <span class="n">datetime</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-429" name="__codelineno-0-429"></a>    <span class="n">fetch_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-430" name="__codelineno-0-430"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<a id="__codelineno-0-431" name="__codelineno-0-431"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Stage-1 historical seed: fetch, stamp, and commit one program&#39;s published history.</span>
-<a id="__codelineno-0-432" name="__codelineno-0-432"></a>
-<a id="__codelineno-0-433" name="__codelineno-0-433"></a><span class="sd">    Resolves `start`/`end` to concrete periods via `reference_periods` and</span>
-<a id="__codelineno-0-434" name="__codelineno-0-434"></a><span class="sd">    `filter_published` (which needs the `release_calendar` state table already built —</span>
-<a id="__codelineno-0-435" name="__codelineno-0-435"></a><span class="sd">    ARCH §5.4), fetches them in one event, and stamps each row as a snapshot-date vintage:</span>
-<a id="__codelineno-0-436" name="__codelineno-0-436"></a><span class="sd">    `release_date` = the run&#39;s snapshot date and `revision`/`benchmark` = `null` — print</span>
-<a id="__codelineno-0-437" name="__codelineno-0-437"></a><span class="sd">    history that predates this pipeline was never observed, so it is not fabricated (the</span>
-<a id="__codelineno-0-438" name="__codelineno-0-438"></a><span class="sd">    ARCH §4.3 backfill honesty rule). Idempotent the same way as `run_ingest`: periods</span>
-<a id="__codelineno-0-439" name="__codelineno-0-439"></a><span class="sd">    already `&quot;ingested&quot;` in the ledger for this snapshot are skipped, and `store.slot_exists`</span>
-<a id="__codelineno-0-440" name="__codelineno-0-440"></a><span class="sd">    (null-safe on the null counters) guards against a duplicate append on re-run after a</span>
-<a id="__codelineno-0-441" name="__codelineno-0-441"></a><span class="sd">    crash between commit and record.</span>
-<a id="__codelineno-0-442" name="__codelineno-0-442"></a>
-<a id="__codelineno-0-443" name="__codelineno-0-443"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-444" name="__codelineno-0-444"></a><span class="sd">        settings: Environment-derived config used to build the HTTP client.</span>
-<a id="__codelineno-0-445" name="__codelineno-0-445"></a><span class="sd">        store: Vintage store backend (Delta or the Parquet escape hatch).</span>
-<a id="__codelineno-0-446" name="__codelineno-0-446"></a><span class="sd">        program: Registry program key. `&quot;ep&quot;` is rejected — EP has no reference periods</span>
-<a id="__codelineno-0-447" name="__codelineno-0-447"></a><span class="sd">            to backfill (it is snapshot/cycle-based, not periodic).</span>
-<a id="__codelineno-0-448" name="__codelineno-0-448"></a><span class="sd">        start: Range start as `YYYY/MM`, `YYYY/Q`, or `YYYY`, per the program&#39;s frequency.</span>
-<a id="__codelineno-0-449" name="__codelineno-0-449"></a><span class="sd">        end: Range end, same format as `start`.</span>
-<a id="__codelineno-0-450" name="__codelineno-0-450"></a><span class="sd">        dry_run: If `True`, fetch and validate but skip both the Delta append and the</span>
-<a id="__codelineno-0-451" name="__codelineno-0-451"></a><span class="sd">            ledger write.</span>
-<a id="__codelineno-0-452" name="__codelineno-0-452"></a><span class="sd">        clock: Injected wall clock for `downloaded`/`ingested_at` and the snapshot date</span>
-<a id="__codelineno-0-453" name="__codelineno-0-453"></a><span class="sd">            itself; defaults to `datetime.now(UTC)`.</span>
-<a id="__codelineno-0-454" name="__codelineno-0-454"></a><span class="sd">        fetch_fn (Callable | None): Injected replacement for the fetch dispatch (default</span>
-<a id="__codelineno-0-455" name="__codelineno-0-455"></a><span class="sd">            `_fetch_event`); tests substitute a fixed frame.</span>
-<a id="__codelineno-0-456" name="__codelineno-0-456"></a>
-<a id="__codelineno-0-457" name="__codelineno-0-457"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-458" name="__codelineno-0-458"></a><span class="sd">        `0` on success, including the no-op cases of an already-complete backfill or a</span>
-<a id="__codelineno-0-459" name="__codelineno-0-459"></a><span class="sd">        range with no published periods. `2` if `program` is `&quot;ep&quot;`, the release calendar</span>
-<a id="__codelineno-0-460" name="__codelineno-0-460"></a><span class="sd">        hasn&#39;t been built yet, `start`/`end` fail to parse as period strings, or the fetch</span>
-<a id="__codelineno-0-461" name="__codelineno-0-461"></a><span class="sd">        step raises. There is no `1` (partial) outcome — a single event covers the whole</span>
-<a id="__codelineno-0-462" name="__codelineno-0-462"></a><span class="sd">        range, so a failure here has no partially-successful state to distinguish.</span>
-<a id="__codelineno-0-463" name="__codelineno-0-463"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-464" name="__codelineno-0-464"></a>    <span class="n">clock</span> <span class="o">=</span> <span class="n">clock</span> <span class="ow">or</span> <span class="n">_utcnow</span>
-<a id="__codelineno-0-465" name="__codelineno-0-465"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">clock</span><span class="p">()</span>
-<a id="__codelineno-0-466" name="__codelineno-0-466"></a>    <span class="k">if</span> <span class="n">program</span> <span class="o">==</span> <span class="s2">&quot;ep&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-467" name="__codelineno-0-467"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;ep is snapshot-based (no reference periods); backfill does not apply&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-468" name="__codelineno-0-468"></a>        <span class="k">return</span> <span class="mi">2</span>
-<a id="__codelineno-0-469" name="__codelineno-0-469"></a>    <span class="n">snapshot_date</span> <span class="o">=</span> <span class="n">now</span><span class="o">.</span><span class="n">date</span><span class="p">()</span>
-<a id="__codelineno-0-470" name="__codelineno-0-470"></a>    <span class="n">cal</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">read_state</span><span class="p">(</span><span class="s2">&quot;release_calendar&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-471" name="__codelineno-0-471"></a>    <span class="k">if</span> <span class="n">cal</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-472" name="__codelineno-0-472"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;release calendar missing — run `bls-stats calendar build` first (ARCH §8)&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-473" name="__codelineno-0-473"></a>        <span class="k">return</span> <span class="mi">2</span>
-<a id="__codelineno-0-474" name="__codelineno-0-474"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-475" name="__codelineno-0-475"></a>        <span class="n">periods</span> <span class="o">=</span> <span class="n">filter_published</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">reference_periods</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">),</span> <span class="n">cal</span><span class="p">)</span>
-<a id="__codelineno-0-476" name="__codelineno-0-476"></a>    <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># PeriodError subclasses ValueError; also empty program calendar</span>
-<a id="__codelineno-0-477" name="__codelineno-0-477"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
-<a id="__codelineno-0-478" name="__codelineno-0-478"></a>        <span class="k">return</span> <span class="mi">2</span>
-<a id="__codelineno-0-479" name="__codelineno-0-479"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">periods</span><span class="p">:</span>
-<a id="__codelineno-0-480" name="__codelineno-0-480"></a>        <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: no published periods in range&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">)</span>
-<a id="__codelineno-0-481" name="__codelineno-0-481"></a>        <span class="k">return</span> <span class="mi">0</span>
-<a id="__codelineno-0-482" name="__codelineno-0-482"></a>    <span class="n">client</span> <span class="o">=</span> <span class="n">build_client</span><span class="p">(</span><span class="n">settings</span><span class="p">)</span>
-<a id="__codelineno-0-483" name="__codelineno-0-483"></a>    <span class="n">ledger</span> <span class="o">=</span> <span class="n">Ledger</span><span class="p">(</span><span class="n">store</span><span class="p">)</span>
-<a id="__codelineno-0-484" name="__codelineno-0-484"></a>    <span class="n">fetch_fn</span> <span class="o">=</span> <span class="n">fetch_fn</span> <span class="ow">or</span> <span class="n">_fetch_event</span>
-<a id="__codelineno-0-485" name="__codelineno-0-485"></a>    <span class="n">slots</span> <span class="o">=</span> <span class="p">[</span><span class="n">Slot</span><span class="p">(</span><span class="n">ref_date</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">p</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;backfill&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">y</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">periods</span><span class="p">]</span>  <span class="c1"># type: ignore[arg-type]</span>
-<a id="__codelineno-0-486" name="__codelineno-0-486"></a>    <span class="n">todo</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-0-487" name="__codelineno-0-487"></a>        <span class="n">s</span>
-<a id="__codelineno-0-488" name="__codelineno-0-488"></a>        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">slots</span>
-<a id="__codelineno-0-489" name="__codelineno-0-489"></a>        <span class="k">if</span> <span class="n">ledger</span><span class="o">.</span><span class="n">slot_status</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">snapshot_date</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;ingested&quot;</span>
-<a id="__codelineno-0-490" name="__codelineno-0-490"></a>    <span class="p">]</span>
-<a id="__codelineno-0-491" name="__codelineno-0-491"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">todo</span><span class="p">:</span>
-<a id="__codelineno-0-492" name="__codelineno-0-492"></a>        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: backfill already complete for range&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">)</span>
-<a id="__codelineno-0-493" name="__codelineno-0-493"></a>        <span class="k">return</span> <span class="mi">0</span>
-<a id="__codelineno-0-494" name="__codelineno-0-494"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-495" name="__codelineno-0-495"></a>        <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">td</span><span class="p">:</span>
-<a id="__codelineno-0-496" name="__codelineno-0-496"></a>            <span class="n">df</span> <span class="o">=</span> <span class="n">fetch_fn</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">program</span><span class="p">,</span> <span class="n">todo</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="n">td</span><span class="p">),</span> <span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-0-497" name="__codelineno-0-497"></a>        <span class="n">records</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-498" name="__codelineno-0-498"></a>        <span class="k">for</span> <span class="n">slot</span> <span class="ow">in</span> <span class="n">todo</span><span class="p">:</span>
-<a id="__codelineno-0-499" name="__codelineno-0-499"></a>            <span class="n">piece</span> <span class="o">=</span> <span class="p">(</span>
-<a id="__codelineno-0-500" name="__codelineno-0-500"></a>                <span class="n">df</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;ref_date&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">)</span> <span class="k">if</span> <span class="s2">&quot;ref_date&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">df</span>
-<a id="__codelineno-0-501" name="__codelineno-0-501"></a>            <span class="p">)</span>
-<a id="__codelineno-0-502" name="__codelineno-0-502"></a>            <span class="k">if</span> <span class="n">piece</span><span class="o">.</span><span class="n">is_empty</span><span class="p">():</span>
-<a id="__codelineno-0-503" name="__codelineno-0-503"></a>                <span class="k">continue</span>
-<a id="__codelineno-0-504" name="__codelineno-0-504"></a>            <span class="n">stamped</span> <span class="o">=</span> <span class="n">stamp</span><span class="p">(</span><span class="n">piece</span><span class="p">,</span> <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">snapshot_date</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;backfill&quot;</span><span class="p">,</span> <span class="n">now</span><span class="p">)</span>
-<a id="__codelineno-0-505" name="__codelineno-0-505"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">store</span><span class="o">.</span><span class="n">slot_exists</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">snapshot_date</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span>
-<a id="__codelineno-0-506" name="__codelineno-0-506"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="n">dry_run</span><span class="p">:</span>
-<a id="__codelineno-0-507" name="__codelineno-0-507"></a>                    <span class="n">store</span><span class="o">.</span><span class="n">append_observations</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">stamped</span><span class="p">)</span>
-<a id="__codelineno-0-508" name="__codelineno-0-508"></a>            <span class="n">records</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
-<a id="__codelineno-0-509" name="__codelineno-0-509"></a>                <span class="n">SlotRecord</span><span class="p">(</span>
-<a id="__codelineno-0-510" name="__codelineno-0-510"></a>                    <span class="n">program</span><span class="p">,</span>
-<a id="__codelineno-0-511" name="__codelineno-0-511"></a>                    <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span>
-<a id="__codelineno-0-512" name="__codelineno-0-512"></a>                    <span class="n">snapshot_date</span><span class="p">,</span>
-<a id="__codelineno-0-513" name="__codelineno-0-513"></a>                    <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-514" name="__codelineno-0-514"></a>                    <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-515" name="__codelineno-0-515"></a>                    <span class="s2">&quot;backfill&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-516" name="__codelineno-0-516"></a>                    <span class="n">stamped</span><span class="o">.</span><span class="n">height</span><span class="p">,</span>
-<a id="__codelineno-0-517" name="__codelineno-0-517"></a>                    <span class="s2">&quot;ingested&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-518" name="__codelineno-0-518"></a>                    <span class="n">now</span><span class="p">,</span>
-<a id="__codelineno-0-519" name="__codelineno-0-519"></a>                <span class="p">)</span>
-<a id="__codelineno-0-520" name="__codelineno-0-520"></a>            <span class="p">)</span>
-<a id="__codelineno-0-521" name="__codelineno-0-521"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">dry_run</span><span class="p">:</span>
-<a id="__codelineno-0-522" name="__codelineno-0-522"></a>            <span class="n">ledger</span><span class="o">.</span><span class="n">record</span><span class="p">(</span><span class="n">records</span><span class="p">)</span>
-<a id="__codelineno-0-523" name="__codelineno-0-523"></a>        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: backfilled </span><span class="si">%d</span><span class="s2"> period(s)&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">records</span><span class="p">))</span>
-<a id="__codelineno-0-524" name="__codelineno-0-524"></a>        <span class="k">return</span> <span class="mi">0</span>
-<a id="__codelineno-0-525" name="__codelineno-0-525"></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-<a id="__codelineno-0-526" name="__codelineno-0-526"></a>        <span class="n">log</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: backfill failed&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">)</span>
-<a id="__codelineno-0-527" name="__codelineno-0-527"></a>        <span class="k">return</span> <span class="mi">2</span>
+<span class="normal"><a href="#__codelineno-0-527">527</a></span>
+<span class="normal"><a href="#__codelineno-0-528">528</a></span>
+<span class="normal"><a href="#__codelineno-0-529">529</a></span>
+<span class="normal"><a href="#__codelineno-0-530">530</a></span>
+<span class="normal"><a href="#__codelineno-0-531">531</a></span>
+<span class="normal"><a href="#__codelineno-0-532">532</a></span>
+<span class="normal"><a href="#__codelineno-0-533">533</a></span>
+<span class="normal"><a href="#__codelineno-0-534">534</a></span>
+<span class="normal"><a href="#__codelineno-0-535">535</a></span>
+<span class="normal"><a href="#__codelineno-0-536">536</a></span>
+<span class="normal"><a href="#__codelineno-0-537">537</a></span>
+<span class="normal"><a href="#__codelineno-0-538">538</a></span>
+<span class="normal"><a href="#__codelineno-0-539">539</a></span>
+<span class="normal"><a href="#__codelineno-0-540">540</a></span>
+<span class="normal"><a href="#__codelineno-0-541">541</a></span>
+<span class="normal"><a href="#__codelineno-0-542">542</a></span>
+<span class="normal"><a href="#__codelineno-0-543">543</a></span>
+<span class="normal"><a href="#__codelineno-0-544">544</a></span>
+<span class="normal"><a href="#__codelineno-0-545">545</a></span>
+<span class="normal"><a href="#__codelineno-0-546">546</a></span>
+<span class="normal"><a href="#__codelineno-0-547">547</a></span>
+<span class="normal"><a href="#__codelineno-0-548">548</a></span>
+<span class="normal"><a href="#__codelineno-0-549">549</a></span>
+<span class="normal"><a href="#__codelineno-0-550">550</a></span>
+<span class="normal"><a href="#__codelineno-0-551">551</a></span>
+<span class="normal"><a href="#__codelineno-0-552">552</a></span>
+<span class="normal"><a href="#__codelineno-0-553">553</a></span>
+<span class="normal"><a href="#__codelineno-0-554">554</a></span>
+<span class="normal"><a href="#__codelineno-0-555">555</a></span>
+<span class="normal"><a href="#__codelineno-0-556">556</a></span>
+<span class="normal"><a href="#__codelineno-0-557">557</a></span>
+<span class="normal"><a href="#__codelineno-0-558">558</a></span>
+<span class="normal"><a href="#__codelineno-0-559">559</a></span>
+<span class="normal"><a href="#__codelineno-0-560">560</a></span>
+<span class="normal"><a href="#__codelineno-0-561">561</a></span>
+<span class="normal"><a href="#__codelineno-0-562">562</a></span>
+<span class="normal"><a href="#__codelineno-0-563">563</a></span>
+<span class="normal"><a href="#__codelineno-0-564">564</a></span>
+<span class="normal"><a href="#__codelineno-0-565">565</a></span>
+<span class="normal"><a href="#__codelineno-0-566">566</a></span>
+<span class="normal"><a href="#__codelineno-0-567">567</a></span>
+<span class="normal"><a href="#__codelineno-0-568">568</a></span>
+<span class="normal"><a href="#__codelineno-0-569">569</a></span>
+<span class="normal"><a href="#__codelineno-0-570">570</a></span>
+<span class="normal"><a href="#__codelineno-0-571">571</a></span>
+<span class="normal"><a href="#__codelineno-0-572">572</a></span>
+<span class="normal"><a href="#__codelineno-0-573">573</a></span>
+<span class="normal"><a href="#__codelineno-0-574">574</a></span>
+<span class="normal"><a href="#__codelineno-0-575">575</a></span>
+<span class="normal"><a href="#__codelineno-0-576">576</a></span>
+<span class="normal"><a href="#__codelineno-0-577">577</a></span>
+<span class="normal"><a href="#__codelineno-0-578">578</a></span>
+<span class="normal"><a href="#__codelineno-0-579">579</a></span>
+<span class="normal"><a href="#__codelineno-0-580">580</a></span>
+<span class="normal"><a href="#__codelineno-0-581">581</a></span>
+<span class="normal"><a href="#__codelineno-0-582">582</a></span>
+<span class="normal"><a href="#__codelineno-0-583">583</a></span>
+<span class="normal"><a href="#__codelineno-0-584">584</a></span>
+<span class="normal"><a href="#__codelineno-0-585">585</a></span>
+<span class="normal"><a href="#__codelineno-0-586">586</a></span>
+<span class="normal"><a href="#__codelineno-0-587">587</a></span>
+<span class="normal"><a href="#__codelineno-0-588">588</a></span>
+<span class="normal"><a href="#__codelineno-0-589">589</a></span>
+<span class="normal"><a href="#__codelineno-0-590">590</a></span>
+<span class="normal"><a href="#__codelineno-0-591">591</a></span>
+<span class="normal"><a href="#__codelineno-0-592">592</a></span>
+<span class="normal"><a href="#__codelineno-0-593">593</a></span>
+<span class="normal"><a href="#__codelineno-0-594">594</a></span>
+<span class="normal"><a href="#__codelineno-0-595">595</a></span>
+<span class="normal"><a href="#__codelineno-0-596">596</a></span>
+<span class="normal"><a href="#__codelineno-0-597">597</a></span>
+<span class="normal"><a href="#__codelineno-0-598">598</a></span>
+<span class="normal"><a href="#__codelineno-0-599">599</a></span>
+<span class="normal"><a href="#__codelineno-0-600">600</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-492" name="__codelineno-0-492"></a><span class="k">def</span><span class="w"> </span><span class="nf">run_backfill</span><span class="p">(</span>
+<a id="__codelineno-0-493" name="__codelineno-0-493"></a>    <span class="n">settings</span><span class="p">:</span> <span class="n">Settings</span><span class="p">,</span>
+<a id="__codelineno-0-494" name="__codelineno-0-494"></a>    <span class="n">store</span><span class="p">:</span> <span class="n">Store</span><span class="p">,</span>
+<a id="__codelineno-0-495" name="__codelineno-0-495"></a>    <span class="n">program</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-496" name="__codelineno-0-496"></a>    <span class="n">start</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-497" name="__codelineno-0-497"></a>    <span class="n">end</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-498" name="__codelineno-0-498"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-499" name="__codelineno-0-499"></a>    <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-500" name="__codelineno-0-500"></a>    <span class="n">clock</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[],</span> <span class="n">datetime</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-501" name="__codelineno-0-501"></a>    <span class="n">fetch_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-502" name="__codelineno-0-502"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<a id="__codelineno-0-503" name="__codelineno-0-503"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Stage-1 historical seed: fetch, stamp, and commit one program&#39;s published history.</span>
+<a id="__codelineno-0-504" name="__codelineno-0-504"></a>
+<a id="__codelineno-0-505" name="__codelineno-0-505"></a><span class="sd">    Resolves `start`/`end` to concrete periods via `reference_periods` and</span>
+<a id="__codelineno-0-506" name="__codelineno-0-506"></a><span class="sd">    `filter_published` (which needs the `release_calendar` state table already built —</span>
+<a id="__codelineno-0-507" name="__codelineno-0-507"></a><span class="sd">    ARCH §5.4), fetches them in one event, and stamps each row as a snapshot-date vintage:</span>
+<a id="__codelineno-0-508" name="__codelineno-0-508"></a><span class="sd">    `release_date` = the run&#39;s snapshot date and `revision`/`benchmark` = `null` — print</span>
+<a id="__codelineno-0-509" name="__codelineno-0-509"></a><span class="sd">    history that predates this pipeline was never observed, so it is not fabricated (the</span>
+<a id="__codelineno-0-510" name="__codelineno-0-510"></a><span class="sd">    ARCH §4.3 backfill honesty rule). Idempotent the same way as `run_ingest`: periods</span>
+<a id="__codelineno-0-511" name="__codelineno-0-511"></a><span class="sd">    already `&quot;ingested&quot;` in the ledger for this snapshot are skipped, and `store.slot_exists`</span>
+<a id="__codelineno-0-512" name="__codelineno-0-512"></a><span class="sd">    (null-safe on the null counters) guards against a duplicate append on re-run after a</span>
+<a id="__codelineno-0-513" name="__codelineno-0-513"></a><span class="sd">    crash between commit and record.</span>
+<a id="__codelineno-0-514" name="__codelineno-0-514"></a>
+<a id="__codelineno-0-515" name="__codelineno-0-515"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-516" name="__codelineno-0-516"></a><span class="sd">        settings: Environment-derived config used to build the HTTP client.</span>
+<a id="__codelineno-0-517" name="__codelineno-0-517"></a><span class="sd">        store: Vintage store backend (Delta or the Parquet escape hatch).</span>
+<a id="__codelineno-0-518" name="__codelineno-0-518"></a><span class="sd">        program: Registry program key. `&quot;ep&quot;` is rejected — EP has no reference periods</span>
+<a id="__codelineno-0-519" name="__codelineno-0-519"></a><span class="sd">            to backfill (it is snapshot/cycle-based, not periodic).</span>
+<a id="__codelineno-0-520" name="__codelineno-0-520"></a><span class="sd">        start: Range start as `YYYY/MM`, `YYYY/Q`, or `YYYY`, per the program&#39;s frequency.</span>
+<a id="__codelineno-0-521" name="__codelineno-0-521"></a><span class="sd">        end: Range end, same format as `start`.</span>
+<a id="__codelineno-0-522" name="__codelineno-0-522"></a><span class="sd">        dry_run: If `True`, fetch and stamp but skip both the Delta append and the ledger</span>
+<a id="__codelineno-0-523" name="__codelineno-0-523"></a><span class="sd">            write (backfill does not run the ingest validation gates — ARCH §7.3).</span>
+<a id="__codelineno-0-524" name="__codelineno-0-524"></a><span class="sd">        clock: Injected wall clock for `downloaded`/`ingested_at` and the snapshot date</span>
+<a id="__codelineno-0-525" name="__codelineno-0-525"></a><span class="sd">            itself; defaults to `datetime.now(UTC)`.</span>
+<a id="__codelineno-0-526" name="__codelineno-0-526"></a><span class="sd">        fetch_fn (Callable | None): Injected replacement for the fetch dispatch (default</span>
+<a id="__codelineno-0-527" name="__codelineno-0-527"></a><span class="sd">            `_fetch_event`); tests substitute a fixed frame.</span>
+<a id="__codelineno-0-528" name="__codelineno-0-528"></a>
+<a id="__codelineno-0-529" name="__codelineno-0-529"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-530" name="__codelineno-0-530"></a><span class="sd">        `0` on success, including the no-op cases of an already-complete backfill or a</span>
+<a id="__codelineno-0-531" name="__codelineno-0-531"></a><span class="sd">        range with no published periods. `2` if `program` is `&quot;ep&quot;`, the release calendar</span>
+<a id="__codelineno-0-532" name="__codelineno-0-532"></a><span class="sd">        hasn&#39;t been built yet, `start`/`end` fail to parse as period strings, or the fetch</span>
+<a id="__codelineno-0-533" name="__codelineno-0-533"></a><span class="sd">        step raises. There is no `1` (partial) outcome — a single event covers the whole</span>
+<a id="__codelineno-0-534" name="__codelineno-0-534"></a><span class="sd">        range, so a failure here has no partially-successful state to distinguish.</span>
+<a id="__codelineno-0-535" name="__codelineno-0-535"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-536" name="__codelineno-0-536"></a>    <span class="n">clock</span> <span class="o">=</span> <span class="n">clock</span> <span class="ow">or</span> <span class="n">_utcnow</span>
+<a id="__codelineno-0-537" name="__codelineno-0-537"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">clock</span><span class="p">()</span>
+<a id="__codelineno-0-538" name="__codelineno-0-538"></a>    <span class="k">if</span> <span class="n">program</span> <span class="o">==</span> <span class="s2">&quot;ep&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-539" name="__codelineno-0-539"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;ep is snapshot-based (no reference periods); backfill does not apply&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-540" name="__codelineno-0-540"></a>        <span class="k">return</span> <span class="mi">2</span>
+<a id="__codelineno-0-541" name="__codelineno-0-541"></a>    <span class="n">snapshot_date</span> <span class="o">=</span> <span class="n">now</span><span class="o">.</span><span class="n">date</span><span class="p">()</span>
+<a id="__codelineno-0-542" name="__codelineno-0-542"></a>    <span class="n">cal</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">read_state</span><span class="p">(</span><span class="s2">&quot;release_calendar&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-543" name="__codelineno-0-543"></a>    <span class="k">if</span> <span class="n">cal</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-544" name="__codelineno-0-544"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;release calendar missing — run `bls-stats calendar build` first (ARCH §8)&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-545" name="__codelineno-0-545"></a>        <span class="k">return</span> <span class="mi">2</span>
+<a id="__codelineno-0-546" name="__codelineno-0-546"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-547" name="__codelineno-0-547"></a>        <span class="n">periods</span> <span class="o">=</span> <span class="n">filter_published</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">reference_periods</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">),</span> <span class="n">cal</span><span class="p">)</span>
+<a id="__codelineno-0-548" name="__codelineno-0-548"></a>    <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># PeriodError subclasses ValueError; also empty program calendar</span>
+<a id="__codelineno-0-549" name="__codelineno-0-549"></a>        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+<a id="__codelineno-0-550" name="__codelineno-0-550"></a>        <span class="k">return</span> <span class="mi">2</span>
+<a id="__codelineno-0-551" name="__codelineno-0-551"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">periods</span><span class="p">:</span>
+<a id="__codelineno-0-552" name="__codelineno-0-552"></a>        <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: no published periods in range&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">)</span>
+<a id="__codelineno-0-553" name="__codelineno-0-553"></a>        <span class="k">return</span> <span class="mi">0</span>
+<a id="__codelineno-0-554" name="__codelineno-0-554"></a>    <span class="n">client</span> <span class="o">=</span> <span class="n">build_client</span><span class="p">(</span><span class="n">settings</span><span class="p">)</span>
+<a id="__codelineno-0-555" name="__codelineno-0-555"></a>    <span class="n">ledger</span> <span class="o">=</span> <span class="n">Ledger</span><span class="p">(</span><span class="n">store</span><span class="p">)</span>
+<a id="__codelineno-0-556" name="__codelineno-0-556"></a>    <span class="n">fetch_fn</span> <span class="o">=</span> <span class="n">fetch_fn</span> <span class="ow">or</span> <span class="n">_fetch_event</span>
+<a id="__codelineno-0-557" name="__codelineno-0-557"></a>    <span class="n">slots</span> <span class="o">=</span> <span class="p">[</span><span class="n">Slot</span><span class="p">(</span><span class="n">ref_date</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">p</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;backfill&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">y</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">periods</span><span class="p">]</span>  <span class="c1"># type: ignore[arg-type]</span>
+<a id="__codelineno-0-558" name="__codelineno-0-558"></a>    <span class="n">todo</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-559" name="__codelineno-0-559"></a>        <span class="n">s</span>
+<a id="__codelineno-0-560" name="__codelineno-0-560"></a>        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">slots</span>
+<a id="__codelineno-0-561" name="__codelineno-0-561"></a>        <span class="k">if</span> <span class="n">ledger</span><span class="o">.</span><span class="n">slot_status</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">snapshot_date</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;ingested&quot;</span>
+<a id="__codelineno-0-562" name="__codelineno-0-562"></a>    <span class="p">]</span>
+<a id="__codelineno-0-563" name="__codelineno-0-563"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">todo</span><span class="p">:</span>
+<a id="__codelineno-0-564" name="__codelineno-0-564"></a>        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: backfill already complete for range&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">)</span>
+<a id="__codelineno-0-565" name="__codelineno-0-565"></a>        <span class="k">return</span> <span class="mi">0</span>
+<a id="__codelineno-0-566" name="__codelineno-0-566"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-567" name="__codelineno-0-567"></a>        <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">td</span><span class="p">:</span>
+<a id="__codelineno-0-568" name="__codelineno-0-568"></a>            <span class="n">df</span> <span class="o">=</span> <span class="n">fetch_fn</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">program</span><span class="p">,</span> <span class="n">todo</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="n">td</span><span class="p">),</span> <span class="n">now</span><span class="p">)</span>
+<a id="__codelineno-0-569" name="__codelineno-0-569"></a>        <span class="n">records</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-570" name="__codelineno-0-570"></a>        <span class="k">for</span> <span class="n">slot</span> <span class="ow">in</span> <span class="n">todo</span><span class="p">:</span>
+<a id="__codelineno-0-571" name="__codelineno-0-571"></a>            <span class="n">piece</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-0-572" name="__codelineno-0-572"></a>                <span class="n">df</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;ref_date&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">)</span> <span class="k">if</span> <span class="s2">&quot;ref_date&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">df</span>
+<a id="__codelineno-0-573" name="__codelineno-0-573"></a>            <span class="p">)</span>
+<a id="__codelineno-0-574" name="__codelineno-0-574"></a>            <span class="k">if</span> <span class="n">piece</span><span class="o">.</span><span class="n">is_empty</span><span class="p">():</span>
+<a id="__codelineno-0-575" name="__codelineno-0-575"></a>                <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: no rows for </span><span class="si">%s</span><span class="s2"> in fetched data — skipped&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">,</span> <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">)</span>
+<a id="__codelineno-0-576" name="__codelineno-0-576"></a>                <span class="k">continue</span>
+<a id="__codelineno-0-577" name="__codelineno-0-577"></a>            <span class="n">stamped</span> <span class="o">=</span> <span class="n">stamp</span><span class="p">(</span><span class="n">piece</span><span class="p">,</span> <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">snapshot_date</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;backfill&quot;</span><span class="p">,</span> <span class="n">now</span><span class="p">)</span>
+<a id="__codelineno-0-578" name="__codelineno-0-578"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">store</span><span class="o">.</span><span class="n">slot_exists</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span> <span class="n">snapshot_date</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-0-579" name="__codelineno-0-579"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="n">dry_run</span><span class="p">:</span>
+<a id="__codelineno-0-580" name="__codelineno-0-580"></a>                    <span class="n">store</span><span class="o">.</span><span class="n">append_observations</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">stamped</span><span class="p">)</span>
+<a id="__codelineno-0-581" name="__codelineno-0-581"></a>            <span class="n">records</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+<a id="__codelineno-0-582" name="__codelineno-0-582"></a>                <span class="n">SlotRecord</span><span class="p">(</span>
+<a id="__codelineno-0-583" name="__codelineno-0-583"></a>                    <span class="n">program</span><span class="p">,</span>
+<a id="__codelineno-0-584" name="__codelineno-0-584"></a>                    <span class="n">slot</span><span class="o">.</span><span class="n">ref_date</span><span class="p">,</span>
+<a id="__codelineno-0-585" name="__codelineno-0-585"></a>                    <span class="n">snapshot_date</span><span class="p">,</span>
+<a id="__codelineno-0-586" name="__codelineno-0-586"></a>                    <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-587" name="__codelineno-0-587"></a>                    <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-588" name="__codelineno-0-588"></a>                    <span class="s2">&quot;backfill&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-589" name="__codelineno-0-589"></a>                    <span class="n">stamped</span><span class="o">.</span><span class="n">height</span><span class="p">,</span>
+<a id="__codelineno-0-590" name="__codelineno-0-590"></a>                    <span class="s2">&quot;ingested&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-591" name="__codelineno-0-591"></a>                    <span class="n">now</span><span class="p">,</span>
+<a id="__codelineno-0-592" name="__codelineno-0-592"></a>                <span class="p">)</span>
+<a id="__codelineno-0-593" name="__codelineno-0-593"></a>            <span class="p">)</span>
+<a id="__codelineno-0-594" name="__codelineno-0-594"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">dry_run</span><span class="p">:</span>
+<a id="__codelineno-0-595" name="__codelineno-0-595"></a>            <span class="n">ledger</span><span class="o">.</span><span class="n">record</span><span class="p">(</span><span class="n">records</span><span class="p">)</span>
+<a id="__codelineno-0-596" name="__codelineno-0-596"></a>        <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: backfilled </span><span class="si">%d</span><span class="s2"> period(s)&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">records</span><span class="p">))</span>
+<a id="__codelineno-0-597" name="__codelineno-0-597"></a>        <span class="k">return</span> <span class="mi">0</span>
+<a id="__codelineno-0-598" name="__codelineno-0-598"></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+<a id="__codelineno-0-599" name="__codelineno-0-599"></a>        <span class="n">log</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%s</span><span class="s2">: backfill failed&quot;</span><span class="p">,</span> <span class="n">program</span><span class="p">)</span>
+<a id="__codelineno-0-600" name="__codelineno-0-600"></a>        <span class="k">return</span> <span class="mi">2</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
