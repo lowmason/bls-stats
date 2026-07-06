@@ -273,6 +273,10 @@ def find_gaps(cal: pl.DataFrame) -> pl.DataFrame:
     any that has no calendar row at all — a scrape/coverage gap, distinct from a release the
     calendar explicitly marks cancelled (null `release_date`, still present as a row).
 
+    This is a distinct scrape-coverage check and is no longer wired into the `gaps` CLI
+    command, which now audits expected-vs-ledger (calendar-expected releases vs. what the
+    pipeline actually recorded).
+
     Args:
         cal: A calendar frame (`CALENDAR_SCHEMA`), e.g. from `build`.
 
@@ -328,7 +332,12 @@ def filter_published(program: str, periods: list[Period], cal: pl.DataFrame) -> 
     if published.is_empty():
         raise ValueError(f"{program}: release calendar is empty — run `calendar build` first")
     max_ref = published["ref_date"].max()
-    cancelled = set(mine.filter(pl.col("release_date").is_null())["ref_date"].to_list())
+    published_refs = set(published["ref_date"].to_list())
+    # A period cancelled in one row but published in another (a rescheduled release) is retained;
+    # only periods cancelled and never republished are dropped (C-25, ARCH §5.4).
+    cancelled = (
+        set(mine.filter(pl.col("release_date").is_null())["ref_date"].to_list()) - published_refs
+    )
     kept = []
     for year, period in periods:
         rd = ref_date(program, year, period)

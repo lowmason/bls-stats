@@ -47,20 +47,26 @@ SIZE_URL = "https://data.bls.gov/cew/data/files/{year}/csv/{year}_q1_by_size.zip
 
 
 def _read_zip_csv(zip_path: Path) -> pl.DataFrame:
-    """Read the single CSV member of a QCEW ZIP with locked dtypes.
+    """Read the single CSV member of a QCEW ZIP with locked dtypes, streaming from disk.
 
     Code columns are read as `Utf8` to preserve leading zeros and alpha `area_fips` values
-    (e.g. `"C1010"` for CSA-level rows) that a type-inferred read would corrupt.
+    (e.g. `"C1010"` for CSA-level rows) that a type-inferred read would corrupt. The member is
+    extracted to a temp file and scanned lazily with a streaming collect so peak memory stays
+    bounded on multi-GB years (ARCH §10 < 8 GB target, C-19) — never decompressed whole into
+    memory.
     """
+    import tempfile
+
+    schema = (
+        {c: pl.Utf8 for c in _CODE_COLS}
+        | {"year": pl.Int32, "qtr": pl.Int8}
+        | {c: pl.Float64 for c in _VALUE_COLS}
+    )
     with zipfile.ZipFile(zip_path) as zf:
         member = next(n for n in zf.namelist() if n.endswith(".csv"))
-        with zf.open(member) as fh:
-            return pl.read_csv(
-                fh.read(),
-                schema_overrides={c: pl.Utf8 for c in _CODE_COLS}
-                | {"year": pl.Int32, "qtr": pl.Int8}
-                | {c: pl.Float64 for c in _VALUE_COLS},
-            )
+        with tempfile.TemporaryDirectory() as td:
+            csv_path = Path(zf.extract(member, td))
+            return pl.scan_csv(csv_path, schema_overrides=schema).collect(engine="streaming")
 
 
 def parse_year_zip(

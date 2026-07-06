@@ -150,11 +150,15 @@ def _fetch_event(
         for year in sorted({r.year for r in refs}):
             quarters = sorted({(r.month + 2) // 3 for r in refs if r.year == year})
             frames.append(fetch_year(client, year, quarters, dest_dir, downloaded))
-        return pl.concat(frames, how="vertical_relaxed")
+        return pl.concat(frames, how="diagonal_relaxed")
     if program == "oews":
         from bls_stats.engines.oews import fetch_year as fetch_oews
 
-        return fetch_oews(client, refs[0].year, dest_dir, downloaded)
+        frames = [
+            fetch_oews(client, year, dest_dir, downloaded)
+            for year in sorted({r.year for r in refs})
+        ]
+        return pl.concat(frames, how="diagonal_relaxed")
     if program == "ep":  # scrape-date vintages need a storage schema decision (ARCH §12)
         raise ValidationError("ep fetch is not wired to the vintage store")
     from bls_stats.engines.labstat import fetch
@@ -205,17 +209,21 @@ def _expire_superseded(
 
 
 def _comparator(ledger: Ledger, program: str, revision: int | None) -> int | None:
-    """ARCH §7.3: most recent ingested row_count for the same program and slot type."""
-    got = (
-        ledger.resolved()
-        .filter(
-            (pl.col("program") == program)
-            & (pl.col("status") == "ingested")
-            & pl.col("revision").eq_missing(pl.lit(revision, dtype=pl.Int16))
-        )
-        .sort("ingested_at", descending=True)
+    """ARCH §7.3: most recent ingested row_count for the same program and slot type.
+
+    Prefers a same-revision comparator; falls back to the latest ingested row for the program
+    regardless of revision (e.g. a backfill baseline with null revision) so the first live
+    increment after a backfill is still row-band-checked rather than ungated (C-16)."""
+    ingested = ledger.resolved().filter(
+        (pl.col("program") == program) & (pl.col("status") == "ingested")
     )
-    return int(got["row_count"][0]) if got.height else None
+    same = ingested.filter(pl.col("revision").eq_missing(pl.lit(revision, dtype=pl.Int16))).sort(
+        "ingested_at", descending=True
+    )
+    if same.height:
+        return int(same["row_count"][0])
+    any_row = ingested.sort("ingested_at", descending=True)
+    return int(any_row["row_count"][0]) if any_row.height else None
 
 
 def run_ingest(
@@ -291,12 +299,77 @@ def run_ingest(
     client = build_client(settings)
     ledger = Ledger(store)
     outcomes: list[str] = []
-    for release in poll_fn(client, programs):
+    releases = list(poll_fn(client, programs))
+    newest_in_batch: dict[str, date] = {}
+    for r in releases:
+        d = newest_in_batch.get(r.program)
+        if d is None or r.release_date > d:
+            newest_in_batch[r.program] = r.release_date
+    resolved = ledger.resolved()
+
+    def _is_backdated(r) -> bool:
+        # A strictly-newer release for this program in the batch, or already ingested,
+        # means r's live-vintage window has closed — the current file no longer reflects
+        # what r published, so fetching it would fabricate a print (ARCH §2.1 / C-14).
+        if r.release_date < newest_in_batch[r.program]:
+            return True
+        ingested = resolved.filter(
+            (pl.col("program") == r.program) & (pl.col("status") == "ingested")
+        )
+        latest = ingested["release_date"].max()
+        return latest is not None and r.release_date < latest
+
+    for release in releases:
+        if _is_backdated(release):
+            # Record only not-yet-resolved slots as missed. Never downgrade an already-
+            # ingested slot: a correct live-vintage print stays ingested forever (ARCH §5.3,
+            # _expire_superseded only expires deferred slots), and re-polling a back-dated
+            # release must be idempotent — the same guard the live branch below uses.
+            missed_slots = [
+                s
+                for s in expand(
+                    release,
+                    lambda rd, program=release.program, before=release.release_date: (
+                        ledger.prior_benchmark_count(program, rd, before_release=before)
+                    ),
+                )
+                if ledger.slot_status(
+                    release.program, s.ref_date, release.release_date, s.revision, s.benchmark
+                )
+                not in ("ingested", "missed")
+            ]
+            if missed_slots and not dry_run:
+                ledger.record(
+                    [
+                        SlotRecord(
+                            release.program,
+                            s.ref_date,
+                            release.release_date,
+                            s.revision,
+                            s.benchmark,
+                            "increment",
+                            0,
+                            "missed",
+                            clock(),
+                        )
+                        for s in missed_slots
+                    ]
+                )
+            log.warning(
+                "%s release %s is back-dated (a newer release exists) — not fetched; "
+                "recorded %d new slot(s) missed, use `backfill` for history (C-14)",
+                release.program,
+                release.release_date,
+                len(missed_slots),
+            )
+            continue
         slots = [
             s
             for s in expand(
                 release,
-                lambda rd, program=release.program: ledger.prior_benchmark_count(program, rd),
+                lambda rd, program=release.program, before=release.release_date: (
+                    ledger.prior_benchmark_count(program, rd, before_release=before)
+                ),
             )
             if ledger.slot_status(
                 release.program, s.ref_date, release.release_date, s.revision, s.benchmark
@@ -371,11 +444,10 @@ def _process_event(
 
     try:
         spec = REGISTRY[program]
-        if (
-            spec.increment_url
-            and spec.increment_url.startswith("https://download.bls.gov")
-            and not fresh_fn(client, program, release.release_date)
-        ):
+        # QCEW/OEWS/EP are freshness_checked=False: their sources don't serve a LABSTAT-style
+        # Last-Modified the flat-file probe understands. QCEW's newest quarter is still guarded
+        # by the year_to_date empty-slice deferral; a QCEW-native freshness probe is future work.
+        if spec.freshness_checked and not fresh_fn(client, program, release.release_date):
             log.warning("%s: file not yet fresh — deferring %d slot(s)", label, len(slots))
             for slot in slots:
                 _record("deferred", slot)
@@ -447,8 +519,8 @@ def run_backfill(
             to backfill (it is snapshot/cycle-based, not periodic).
         start: Range start as `YYYY/MM`, `YYYY/Q`, or `YYYY`, per the program's frequency.
         end: Range end, same format as `start`.
-        dry_run: If `True`, fetch and validate but skip both the Delta append and the
-            ledger write.
+        dry_run: If `True`, fetch and stamp but skip both the Delta append and the ledger
+            write (backfill does not run the ingest validation gates — ARCH §7.3).
         clock: Injected wall clock for `downloaded`/`ingested_at` and the snapshot date
             itself; defaults to `datetime.now(UTC)`.
         fetch_fn (Callable | None): Injected replacement for the fetch dispatch (default
@@ -500,6 +572,7 @@ def run_backfill(
                 df.filter(pl.col("ref_date") == slot.ref_date) if "ref_date" in df.columns else df
             )
             if piece.is_empty():
+                log.warning("%s: no rows for %s in fetched data — skipped", program, slot.ref_date)
                 continue
             stamped = stamp(piece, slot.ref_date, snapshot_date, None, None, "backfill", now)
             if not store.slot_exists(program, slot.ref_date, snapshot_date, None, None):

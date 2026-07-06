@@ -171,10 +171,6 @@ def export_metadata(store: Store, meta: dict[str, pl.DataFrame]) -> None:
     """
     for name, df in meta.items():
         tagged = df.with_columns(pl.lit("cps").alias("program"))
-        uri = (
-            f"{store.uri}/cps/metadata/series"
-            if name == "series"
-            else f"{store.uri}/cps/metadata/mappings/{name}"
-        )
-        tagged.write_delta(uri, mode="overwrite", storage_options=store.storage_options)
+        relative = "cps/metadata/series" if name == "series" else f"cps/metadata/mappings/{name}"
+        store.replace_table(relative, tagged)
         log.info("cps metadata: exported %s (%d rows)", name, df.height)

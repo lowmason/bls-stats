@@ -6,11 +6,11 @@ from bls_stats.core.config import Settings
 from bls_stats.storage.doctor import check_conditional_put, check_deltalake, check_env
 
 
-def test_check_env_flags_default_email_and_local_store() -> None:
-    results = {r.name: r for r in check_env(Settings())}
-    assert results["contact_email"].ok is False  # default email → warn
-    assert results["store_uri"].ok is False  # local path → warn (ARCH §10)
-    assert results["api_key"].ok is False
+def test_check_env_warns_not_fails_on_optional() -> None:  # C-6
+    results = {c.name: c for c in check_env(Settings())}  # all defaults
+    assert results["api_key"].ok is True and results["api_key"].warn is True
+    assert results["store_uri"].ok is True and results["store_uri"].warn is True
+    assert results["contact_email"].ok is True and results["contact_email"].warn is True
 
 
 def test_check_env_passes_with_real_config() -> None:
@@ -41,3 +41,30 @@ def test_conditional_put_against_minio() -> None:
         Settings(store_uri="s3://bls-stats/test-store", aws_endpoint_url=endpoint)
     )
     assert r.ok is True and "supported" in r.detail
+
+
+def test_conditional_put_probe_uses_store_prefix(monkeypatch) -> None:  # C-17
+    from botocore.exceptions import ClientError
+
+    from bls_stats.core.config import Settings
+    from bls_stats.storage import doctor
+
+    captured = {}
+
+    class FakeS3:
+        def put_object(self, Bucket, Key, Body, IfNoneMatch):
+            captured.setdefault("bucket", Bucket)
+            captured.setdefault("key", Key)
+            if "n" not in captured:
+                captured["n"] = 1
+                return {}
+            raise ClientError({"ResponseMetadata": {"HTTPStatusCode": 412}}, "PutObject")
+
+        def delete_object(self, Bucket, Key):
+            pass
+
+    monkeypatch.setattr("boto3.client", lambda *a, **k: FakeS3())
+    s = Settings(store_uri="s3://mybucket/prefix/store", aws_endpoint_url="http://localhost:9000")
+    doctor.check_conditional_put(s)
+    assert captured["bucket"] == "mybucket"
+    assert captured["key"].startswith("prefix/store/")  # probe under the store prefix, not root

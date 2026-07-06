@@ -22,7 +22,10 @@ loop continues with the next event. One broken program never blocks the rest.
 
 ## Validation gates
 
-[`validate`][bls_stats.pipeline.validate] runs before every commit:
+[`validate`][bls_stats.pipeline.validate] runs before every **ingest** commit. `backfill` is the
+trusted historical baseline (ARCH §7.3): it skips the row-band/null-rate gates deliberately — the
+string locks are enforced at the engine/parse layer and the store's vintage-schema gate still
+guards every append — so a backfill commit is not `validate()`-gated.
 
 | Gate | Check | On failure |
 |---|---|---|

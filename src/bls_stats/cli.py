@@ -14,6 +14,7 @@ from datetime import date
 import typer
 
 from bls_stats.core.config import load_settings, storage_options
+from bls_stats.registry import REGISTRY
 
 app = typer.Typer(help="Vintage-aware BLS data downloads and ingest.")
 calendar_app = typer.Typer(help="Release-date calendar.")
@@ -23,7 +24,21 @@ app.add_typer(calendar_app, name="calendar")
 app.add_typer(store_app, name="store")
 app.add_typer(metadata_app, name="metadata")
 
-PROGRAMS = ["ces", "sae", "jolts", "cps", "bed", "qcew", "oews", "ep"]
+PROGRAMS = list(REGISTRY)
+
+
+def _require_program(program: str) -> None:
+    if program not in REGISTRY:
+        typer.echo(f"unknown program {program!r} — choose from {PROGRAMS}", err=True)
+        raise typer.Exit(2)
+
+
+def _parse_date(value: str, label: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        typer.echo(f"{label}: invalid date {value!r} (expected YYYY-MM-DD)", err=True)
+        raise typer.Exit(2) from None
 
 
 def _setup() -> tuple:
@@ -55,6 +70,8 @@ def ingest(
     import bls_stats.pipeline as pipeline
 
     settings, store = _setup()
+    if program is not None:
+        _require_program(program)
     programs = [program] if program else None
     raise typer.Exit(pipeline.run_ingest(settings, store, programs, dry_run=dry_run))
 
@@ -80,6 +97,7 @@ def backfill(
     from bls_stats.core.periods import reference_periods
 
     settings, store = _setup()
+    _require_program(program)
     if program == "qcew":
         try:
             years = sorted({y for y, _ in reference_periods("qcew", start, end)})
@@ -96,12 +114,12 @@ def backfill(
 
 @calendar_app.command("build")
 def calendar_build() -> None:
-    """Full archive+schedule scrape with lapse overlay (ARCH §5.4).
+    """Scrape and append a full archive+schedule calendar with lapse overlay (ARCH §5.4).
 
-    Rebuilds the `release_calendar` state table from scratch for every program except
-    `ep` (which has no archive/schedule pages — ARCH §5.2). Run once to bootstrap before
-    the first `backfill`, and thereafter only to pick up structural changes; `calendar
-    refresh` is the cheap day-to-day update. Always exits `0`.
+    Appends the freshly scraped rows to the `release_calendar` state table (it does not
+    replace it — downstream reads dedupe on `(program, ref_date, release_date)`). Run once to
+    bootstrap before the first `backfill`; `calendar refresh` is the cheap day-to-day update.
+    Always exits `0`.
     """
     from bls_stats.core.http import build_client
     from bls_stats.releases.calendar import build
@@ -153,6 +171,7 @@ def calendar_show(program: str = typer.Option(...)) -> None:
     import polars as pl
 
     _, store = _setup()
+    _require_program(program)
     cal = store.read_state("release_calendar")
     if cal is None:
         typer.echo("no calendar — run `bls-stats calendar build`", err=True)
@@ -164,40 +183,52 @@ def calendar_show(program: str = typer.Option(...)) -> None:
 def gaps(
     program: str | None = typer.Option(None),
     strict: bool = typer.Option(False, "--strict", help="missed prints also exit non-zero"),
+    as_of_date: str | None = typer.Option(
+        None, "--as-of-date", help="audit expected releases published on/before this YYYY-MM-DD"
+    ),
 ) -> None:
-    """Unexplained gaps exit non-zero; recorded missed/deferred are acknowledged (ARCH §8).
+    """Audit expected releases (from the calendar) against the ledger (ARCH §5.3, §8).
 
-    Diffs the release calendar's expected `(program, ref_date)` pairs against the ledger.
-    A gap with no ledger row at all (of any status) is "unexplained" — the calendar
-    expected a release and nothing was ever recorded for it. A gap with a `missed` or
-    `deferred` ledger row is "acknowledged": printed for visibility but not treated as a
-    failure, so one historical outage doesn't alarm on every subsequent run.
-
-    Exits `1` if any unexplained gap exists, or if `--strict` is set and any acknowledged
-    gap has status `missed` (for one-off audits that want permanent gaps to fail too);
-    `1` also if the release calendar hasn't been built yet. Exits `0` otherwise.
+    A calendar row with a non-null `release_date` at or before the reference date is an
+    *expected* release. If the ledger has no row for its `(program, ref_date)` (of any status),
+    it is *unexplained* — a release the pipeline never recorded. Recorded `missed`/`deferred`
+    slots are *acknowledged*: printed but not failing, unless `--strict` (which also fails on
+    `missed`). The reference date defaults to the latest published `release_date` in the
+    calendar; `--as-of-date` overrides it. Exits `1` on any unexplained gap, on a `--strict`
+    missed slot, or if the calendar is unbuilt; `0` otherwise.
     """
     import polars as pl
 
-    from bls_stats.releases.calendar import find_gaps
     from bls_stats.vintage.ledger import Ledger
 
     _, store = _setup()
+    if program:
+        _require_program(program)
     cal = store.read_state("release_calendar")
     if cal is None:
         typer.echo("no calendar — run `bls-stats calendar build`", err=True)
         raise typer.Exit(1)
+    ledger = Ledger(store).resolved()
     if program:
         cal = cal.filter(pl.col("program") == program)
-    calendar_gaps = find_gaps(cal)
-    ledger = Ledger(store).resolved()
-    acknowledged = ledger.filter(pl.col("status").is_in(["missed", "deferred"]))
-    unexplained = calendar_gaps.join(
-        ledger.select("program", "ref_date").unique(), on=["program", "ref_date"], how="anti"
+        ledger = ledger.filter(pl.col("program") == program)
+    published = cal.filter(pl.col("release_date").is_not_null())
+    ref = (
+        _parse_date(as_of_date, "--as-of-date")
+        if as_of_date
+        else (published["release_date"].max() if published.height else None)
     )
+    expected = (
+        published.filter(pl.col("release_date") <= ref).select("program", "ref_date").unique()
+        if ref is not None
+        else published.select("program", "ref_date").unique()
+    )
+    recorded = ledger.select("program", "ref_date").unique()
+    unexplained = expected.join(recorded, on=["program", "ref_date"], how="anti")
+    acknowledged = ledger.filter(pl.col("status").is_in(["missed", "deferred"]))
     typer.echo(f"unexplained: {unexplained.height}  acknowledged: {acknowledged.height}")
     if unexplained.height:
-        typer.echo(str(unexplained))
+        typer.echo(str(unexplained.sort("program", "ref_date")))
     missed = acknowledged.filter(pl.col("status") == "missed")
     raise typer.Exit(1 if (unexplained.height or (strict and missed.height)) else 0)
 
@@ -262,21 +293,21 @@ def store_query(
     """
     import polars as pl
 
-    from bls_stats.registry import REGISTRY
     from bls_stats.storage.reads import as_of as as_of_read
     from bls_stats.storage.reads import latest
 
     _, store = _setup()
+    _require_program(program)
     lf = store.scan_observations(program)
     if lf is None:
         typer.echo(f"{program}: (empty)", err=True)
         raise typer.Exit(1)
-    lf = lf.filter(pl.col("ref_date") == date.fromisoformat(ref_date))
+    lf = lf.filter(pl.col("ref_date") == _parse_date(ref_date, "--ref-date"))
     units = list(REGISTRY[program].unit_columns)
     if all_vintages:
         out = lf.sort("release_date").collect()
     elif as_of:
-        out = as_of_read(lf, units, date.fromisoformat(as_of)).collect()
+        out = as_of_read(lf, units, _parse_date(as_of, "--as-of")).collect()
     else:
         out = latest(lf, units).collect()
     typer.echo(str(out))
@@ -286,8 +317,9 @@ def store_query(
 def metadata_fetch(refresh: bool = typer.Option(False)) -> None:
     """Download and cache the CPS dimension tables (series catalog + `ln.*` mappings).
 
-    Cached under `data/cps_metadata` with an integrity manifest; `--refresh` forces a
-    re-download even if the cache looks valid. Always exits `0`.
+    Cached under `settings.metadata_cache_dir` (env `BLS_METADATA_CACHE`, default
+    `data/cps_metadata`) with an integrity manifest; `--refresh` forces a re-download
+    even if the cache looks valid. Always exits `0`.
     """
     from pathlib import Path
 
@@ -295,7 +327,9 @@ def metadata_fetch(refresh: bool = typer.Option(False)) -> None:
     from bls_stats.enrich.cps import fetch_metadata
 
     settings, _ = _setup()
-    meta = fetch_metadata(build_client(settings), Path("data/cps_metadata"), refresh=refresh)
+    meta = fetch_metadata(
+        build_client(settings), Path(settings.metadata_cache_dir), refresh=refresh
+    )
     typer.echo(f"fetched {len(meta)} metadata tables")
 
 
@@ -313,7 +347,7 @@ def metadata_export() -> None:
     from bls_stats.enrich.cps import export_metadata, fetch_metadata
 
     settings, store = _setup()
-    meta = fetch_metadata(build_client(settings), Path("data/cps_metadata"))
+    meta = fetch_metadata(build_client(settings), Path(settings.metadata_cache_dir))
     export_metadata(store, meta)
     typer.echo("exported")
 
@@ -339,8 +373,8 @@ def metadata_enrich(ref_date_opt: str = typer.Option(..., "--ref-date")) -> None
     if lf is None:
         typer.echo("cps: (empty)", err=True)
         raise typer.Exit(1)
-    obs = lf.filter(pl.col("ref_date") == date.fromisoformat(ref_date_opt)).collect()
-    meta = fetch_metadata(build_client(settings), Path("data/cps_metadata"))
+    obs = lf.filter(pl.col("ref_date") == _parse_date(ref_date_opt, "--ref-date")).collect()
+    meta = fetch_metadata(build_client(settings), Path(settings.metadata_cache_dir))
     typer.echo(str(enrich(obs, meta)))
 
 
@@ -359,6 +393,6 @@ def doctor() -> None:
     settings, _ = _setup()
     results = run_all(settings)
     for r in results:
-        mark = "✓" if r.ok else "✗"
+        mark = "!" if r.warn else ("✓" if r.ok else "✗")
         typer.echo(f"{mark} {r.name}: {r.detail}")
     raise typer.Exit(0 if all(r.ok for r in results) else 1)

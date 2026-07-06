@@ -63,3 +63,28 @@ def test_enrich_resolves_multi_code_footnotes() -> None:
 def test_enrich_empty_footnote_codes_resolve_null() -> None:
     out = enrich(_obs(), _meta())
     assert out.filter(pl.col("series_id") == "LNU99999999")["footnote_text"][0] is None
+
+
+def test_export_metadata_uses_store_replace_table(tmp_path) -> None:  # C-10
+    import polars as pl
+
+    from bls_stats.enrich.cps import export_metadata
+
+    calls = []
+
+    class FakeStore:
+        uri = str(tmp_path)
+        storage_options = None
+
+        def replace_table(self, relative_path, df):
+            calls.append(relative_path)
+
+    export_metadata(
+        FakeStore(),
+        {
+            "series": pl.DataFrame({"series_id": ["LNS14000000"]}),
+            "ages": pl.DataFrame({"ages_code": ["00"]}),
+        },
+    )
+    assert "cps/metadata/series" in calls
+    assert "cps/metadata/mappings/ages" in calls

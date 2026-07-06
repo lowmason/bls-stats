@@ -55,3 +55,7 @@ class Store(Protocol):
     def read_state(self, table: str) -> pl.DataFrame | None:
         """Read a full state table eagerly, or `None` if it has never been written."""
         ...
+
+    def replace_table(self, relative_path: str, df: pl.DataFrame) -> None:
+        """Snapshot-replace a non-observations table under the store (overwrite semantics)."""
+        ...

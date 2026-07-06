@@ -19,11 +19,14 @@ class CheckResult:
         ok: Whether the check passed. A probe that is skipped as not applicable (e.g.
             conditional-PUT on a local store) reports `ok=True` with a `"skipped: ..."` detail.
         detail: Human-readable explanation — the value observed, or the reason for failure.
+        warn: `ok=True` but sub-optimal — a documented optional/laptop setting (e.g. a
+            placeholder contact email or a local store URI) rather than a hard failure.
     """
 
     name: str
     ok: bool
     detail: str
+    warn: bool = False  # ok=True but sub-optimal (documented optional/laptop settings)
 
 
 def check_env(settings: Settings) -> list[CheckResult]:
@@ -32,7 +35,8 @@ def check_env(settings: Settings) -> list[CheckResult]:
     Each sub-check warns (does not hard-fail) on a placeholder or laptop-only setting: a
     default contact email is a BLS-etiquette problem, not a crash; a local `store_uri` is
     explicitly supported for laptop use (ARCH §10) but flagged since it's rarely the deployment
-    intent; a missing API key merely disables the `api_v2` fetch engine.
+    intent; a missing API key merely disables the `api_v2` fetch engine. All three therefore
+    return `ok=True` with `warn=True` on a placeholder/laptop setting — never a hard fail.
 
     Args:
         settings: Loaded application settings.
@@ -43,22 +47,25 @@ def check_env(settings: Settings) -> list[CheckResult]:
     return [
         CheckResult(
             "contact_email",
-            not settings.contact_email_is_default,
+            True,
             settings.contact_email
             if not settings.contact_email_is_default
             else "BLS_CONTACT_EMAIL unset — using placeholder; BLS expects a real contact",
+            warn=settings.contact_email_is_default,
         ),
         CheckResult(
             "store_uri",
-            settings.store_uri.startswith("s3://"),
+            True,
             settings.store_uri
             if settings.store_uri.startswith("s3://")
             else f"{settings.store_uri} is a local path — laptop-only convenience (ARCH §10)",
+            warn=not settings.store_uri.startswith("s3://"),
         ),
         CheckResult(
             "api_key",
-            settings.api_key is not None,
+            True,
             "set" if settings.api_key else "BLS_API_KEY unset — api_v2 engine unavailable",
+            warn=settings.api_key is None,
         ),
     ]
 
@@ -130,8 +137,10 @@ def check_conditional_put(settings: Settings) -> CheckResult:
     import boto3
     from botocore.exceptions import ClientError
 
-    bucket = settings.store_uri.removeprefix("s3://").split("/", 1)[0]
-    key = f"_doctor/probe-{uuid.uuid4().hex}"
+    without_scheme = settings.store_uri.removeprefix("s3://")
+    bucket, _, prefix = without_scheme.partition("/")
+    prefix = prefix.rstrip("/")
+    key = f"{prefix + '/' if prefix else ''}_doctor/probe-{uuid.uuid4().hex}"
     s3 = boto3.client("s3", endpoint_url=settings.aws_endpoint_url)
     try:
         s3.put_object(Bucket=bucket, Key=key, Body=b"a", IfNoneMatch="*")

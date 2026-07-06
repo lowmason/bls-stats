@@ -165,10 +165,10 @@ changes the row count.
 bls-stats doctor
 ```
 
-Pre-flight probes, printed as a ✓/✗ checklist:
+Pre-flight probes, printed as a checklist where ✓ = pass, `!` = warning (non-failing), ✗ = failure:
 
-- environment: `BLS_CONTACT_EMAIL` set, credentials present, store URI shape
-- deltalake: local round-trip write/read
+- environment: `BLS_CONTACT_EMAIL` set, store URI shape, API-key presence (warnings, not failures)
+- deltalake: package importable (version reported)
 - store: reachability of `BLS_STORE_URI`
 - conditional PUT: the [412 probe](concepts/storage.md#concurrent-writers-conditional-put) that
   proves concurrent-writer safety (advises `BLS_S3_UNSAFE_RENAME` if unsupported)

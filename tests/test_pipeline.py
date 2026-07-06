@@ -75,6 +75,29 @@ def test_rerun_is_noop(store) -> None:
     assert store.scan_observations("ces").collect().height == 9  # no duplicates
 
 
+def test_benchmark_release_rerun_is_noop(store) -> None:  # C-13
+    """Re-polling the same benchmark release must not re-append its window (ARCH §4.3/§7.2)."""
+    from datetime import timedelta
+
+    bench = Release("ces", date(2027, 2, 5), 2027, 1, True)  # CES Feb benchmark, Jan-2027 data
+    run1 = datetime(2027, 2, 6, 13, 0, tzinfo=UTC)
+    run2 = run1 + timedelta(days=1)  # next daily cron; benchmark still in the feed
+    common = dict(
+        programs=["ces"],
+        poll_fn=lambda client, programs: [bench],
+        fetch_fn=fake_fetch(),
+        fresh_fn=lambda client, program, rd: True,
+    )
+    run_ingest(Settings(), store, clock=lambda: run1, **common)
+    after_run1 = store.scan_observations("ces").collect().height
+    run_ingest(Settings(), store, clock=lambda: run2, **common)  # re-poll same release
+    obs = store.scan_observations("ces").collect()
+    assert obs.height == after_run1  # no duplicate window rows
+    key = ["series_id", "ref_date", "release_date"]
+    assert obs.unique(subset=key).height == obs.height  # candidate key still unique
+    assert obs.filter(pl.col("benchmark") == 2).height == 0  # no fabricated benchmark=2
+
+
 def test_crash_between_commit_and_record_repairs(store, monkeypatch) -> None:
     calls = {"n": 0}
     original = Ledger.record
@@ -114,6 +137,85 @@ def test_superseded_deferred_becomes_missed(store) -> None:  # ARCH §5.3 transi
     led = Ledger(store).resolved()
     june = led.filter(pl.col("release_date") == date(2026, 7, 2))
     assert june.height == 3 and (june["status"] == "missed").all()
+
+
+def test_backdated_release_denied_not_fabricated(store) -> None:  # C-14
+    """Catch-up ingest must not stamp the current file as an older release's live print."""
+    older = Release("ces", date(2026, 6, 5), 2026, 5, False)
+    newer = Release("ces", date(2026, 7, 2), 2026, 6, False)
+    run_ingest(
+        Settings(),
+        store,
+        programs=["ces"],
+        clock=CLOCK,
+        poll_fn=lambda client, programs: [older, newer],  # outage catch-up: two at once
+        fetch_fn=fake_fetch(),
+        fresh_fn=lambda client, program, rd: True,
+    )
+    obs = store.scan_observations("ces").collect()
+    # the older release's date must NOT appear as a committed vintage:
+    assert obs.filter(pl.col("release_date") == date(2026, 6, 5)).height == 0
+    # the newer release committed normally:
+    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height > 0
+    # the older release's slots are recorded missed (visible to `gaps`), not silently dropped:
+    led = Ledger(store).resolved()
+    older_rows = led.filter(pl.col("release_date") == date(2026, 6, 5))
+    assert older_rows.height > 0 and (older_rows["status"] == "missed").all()
+
+
+def test_freshness_gate_consulted_per_registry_flag(store) -> None:  # C-15
+    calls = {"ces": 0, "qcew": 0}
+
+    def fresh(client, program, rd):
+        calls[program] = calls.get(program, 0) + 1
+        return True
+
+    run_ingest(
+        Settings(),
+        store,
+        programs=["ces"],
+        clock=CLOCK,
+        poll_fn=lambda client, programs: [JUNE_RELEASE],
+        fetch_fn=fake_fetch(),
+        fresh_fn=fresh,
+    )
+    assert calls["ces"] == 1  # LABSTAT program: freshness checked
+
+    from bls_stats.registry import REGISTRY
+
+    assert REGISTRY["ces"].freshness_checked is True
+    assert REGISTRY["qcew"].freshness_checked is False
+    assert REGISTRY["oews"].freshness_checked is False
+
+
+def test_backdated_repoll_does_not_downgrade_ingested(store) -> None:  # C-14 fix (Important #1)
+    """A back-dated re-poll must not flip an already-ingested slot to missed (ARCH §5.3)."""
+    june = Release("ces", date(2026, 7, 2), 2026, 6, False)  # June data, published Jul 2
+    july = Release("ces", date(2026, 8, 6), 2026, 7, False)  # July data, published Aug 6 (newer)
+    _ingest(store, poll_fn=lambda client, programs: [june], clock=CLOCK)  # run 1: June ingests
+    # run 2: rolling feed rolls forward, June re-appears alongside newer July
+    _ingest(store, poll_fn=lambda client, programs: [june, july], clock=LATER_CLOCK)
+    led = Ledger(store).resolved()
+    june_rows = led.filter(pl.col("release_date") == date(2026, 7, 2))
+    assert june_rows.height > 0 and (june_rows["status"] == "ingested").all()  # NOT downgraded
+    obs = store.scan_observations("ces").collect()
+    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height > 0  # June obs intact
+    assert obs.filter(pl.col("release_date") == date(2026, 8, 6)).height > 0  # July committed
+
+
+def test_backdated_via_ledger_branch_recorded_missed(store) -> None:  # C-14 coverage (Important #2)
+    """The 'already-ingested in ledger' back-dated branch: a lone older re-poll denied + missed."""
+    june = Release("ces", date(2026, 7, 2), 2026, 6, False)
+    july = Release("ces", date(2026, 8, 6), 2026, 7, False)
+    _ingest(store, poll_fn=lambda client, programs: [july], clock=CLOCK)  # run 1: July ingests
+    # run 2: lone older re-poll (June only), already back-dated by the ingested July in the ledger
+    _ingest(store, poll_fn=lambda client, programs: [june], clock=LATER_CLOCK)
+    obs = store.scan_observations("ces").collect()
+    assert obs.filter(pl.col("release_date") == date(2026, 7, 2)).height == 0  # June not fabricated
+    led = Ledger(store).resolved()
+    june_rows = led.filter(pl.col("release_date") == date(2026, 7, 2))
+    assert june_rows.height > 0 and (june_rows["status"] == "missed").all()  # recorded missed
+    assert (led.filter(pl.col("release_date") == date(2026, 8, 6))["status"] == "ingested").all()
 
 
 def test_empty_slice_defers(store) -> None:
@@ -189,3 +291,191 @@ def test_ingest_ep_only_exits_two(store) -> None:
 
 def test_backfill_ep_exits_two(store) -> None:
     assert run_backfill(Settings(), store, "ep", "2024", "2026", clock=CLOCK) == 2
+
+
+def test_comparator_falls_back_to_latest_ingested(store) -> None:  # C-16
+    from bls_stats.pipeline import _comparator
+    from bls_stats.vintage.ledger import Ledger, SlotRecord
+
+    ledger = Ledger(store)
+    ledger.record(
+        [
+            SlotRecord(
+                "ces",
+                date(2026, 5, 12),
+                date(2026, 6, 1),
+                None,
+                None,
+                "backfill",
+                500,
+                "ingested",
+                NOW,
+            ),
+        ]
+    )
+    # revision=0 increment has no same-revision comparator, but a backfill baseline exists:
+    assert _comparator(ledger, "ces", 0) == 500
+
+
+def test_oews_multiyear_backfill_fetches_all_years(store, monkeypatch) -> None:  # C-3
+    import bls_stats.engines.oews as oews_engine
+
+    def fake_oews(client, year, dest_dir, downloaded):
+        return pl.DataFrame(
+            {
+                "area": ["0000000"],
+                "occ_code": ["00-0000"],
+                "value": [1.0],
+                "ref_date": [date(year, 5, 12)],
+                "downloaded": [downloaded],
+            },
+            schema={
+                "area": pl.Utf8,
+                "occ_code": pl.Utf8,
+                "value": pl.Float64,
+                "ref_date": pl.Date,
+                "downloaded": pl.Datetime("us", "UTC"),
+            },
+        )
+
+    monkeypatch.setattr(oews_engine, "fetch_year", fake_oews)
+    from bls_stats.pipeline import _fetch_event
+    from bls_stats.releases.profiles import Slot
+
+    slots = [Slot(date(y, 5, 12), None, None, "backfill") for y in (2020, 2021, 2022)]
+    df = _fetch_event(None, "oews", slots, __import__("pathlib").Path("/tmp"), NOW)
+    assert sorted(df["ref_date"].dt.year().unique().to_list()) == [2020, 2021, 2022]
+
+
+def test_oews_multiyear_backfill_tolerates_column_drift(monkeypatch) -> None:  # C-3 review
+    import bls_stats.engines.oews as oews_engine
+    from bls_stats.pipeline import _fetch_event
+    from bls_stats.releases.profiles import Slot
+
+    def fake_oews(client, year, dest_dir, downloaded):
+        cols = {
+            "area": ["0000000"],
+            "occ_code": ["00-0000"],
+            "value": [1.0],
+            "ref_date": [date(year, 5, 12)],
+            "downloaded": [downloaded],
+        }
+        if year == 2021:
+            cols["naics"] = ["000000"]  # 2021 has an extra code column 2020 lacks -> column drift
+        return pl.DataFrame(cols)
+
+    monkeypatch.setattr(oews_engine, "fetch_year", fake_oews)
+    slots = [Slot(date(y, 5, 12), None, None, "backfill") for y in (2020, 2021)]
+    df = _fetch_event(None, "oews", slots, __import__("pathlib").Path("/tmp"), NOW)
+    assert sorted(df["ref_date"].dt.year().unique().to_list()) == [2020, 2021]
+    assert "naics" in df.columns  # union schema; the 2020 row has a null naics
+
+
+def _backfill_cal(store):
+    """A minimal release_calendar so filter_published passes for jolts."""
+    from bls_stats.releases.calendar import CALENDAR_SCHEMA
+
+    store.append_state(
+        "release_calendar",
+        pl.DataFrame(
+            [
+                {
+                    "program": "jolts",
+                    "ref_date": date(2026, 1, 30),
+                    "release_date": date(2026, 3, 1),
+                    "original_release": None,
+                    "is_benchmark": False,
+                },
+            ],
+            schema=CALENDAR_SCHEMA,
+        ),
+    )
+
+
+def test_backfill_success_then_idempotent(store) -> None:  # C-20
+    _backfill_cal(store)
+    code = run_backfill(
+        Settings(),
+        store,
+        "jolts",
+        "2026/01",
+        "2026/01",
+        clock=CLOCK,
+        fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+    )
+    assert code == 0
+    first = store.scan_observations("jolts").collect().height
+    assert first > 0
+    run_backfill(
+        Settings(),
+        store,
+        "jolts",
+        "2026/01",
+        "2026/01",
+        clock=CLOCK,
+        fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+    )
+    assert store.scan_observations("jolts").collect().height == first  # no duplicates
+
+
+def test_backfill_crash_repairs(store, monkeypatch) -> None:  # C-20
+    _backfill_cal(store)
+    calls = {"n": 0}
+    original = Ledger.record
+
+    def crashing(self, records):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("crash after commit")
+        return original(self, records)
+
+    monkeypatch.setattr(Ledger, "record", crashing)
+    assert (
+        run_backfill(
+            Settings(),
+            store,
+            "jolts",
+            "2026/01",
+            "2026/01",
+            clock=CLOCK,
+            fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+        )
+        == 2
+    )
+    height = store.scan_observations("jolts").collect().height
+    monkeypatch.undo()
+    assert (
+        run_backfill(
+            Settings(),
+            store,
+            "jolts",
+            "2026/01",
+            "2026/01",
+            clock=lambda: NOW,
+            fetch_fn=fake_fetch(refs=[date(2026, 1, 30)]),
+        )
+        == 0
+    )
+    assert store.scan_observations("jolts").collect().height == height  # repaired, not doubled
+
+
+def test_mixed_ingest_exit_one_and_isolates(store) -> None:  # C-21
+    ok_release = Release("ces", date(2026, 7, 2), 2026, 6, False)
+    bad_release = Release("jolts", date(2026, 7, 2), 2026, 5, False)
+
+    def fetch(client, program, slots, dest_dir, downloaded):
+        if program == "jolts":
+            raise RuntimeError("jolts download failed")
+        return fake_fetch()(client, program, slots, dest_dir, downloaded)
+
+    code = run_ingest(
+        Settings(),
+        store,
+        programs=["ces", "jolts"],
+        clock=CLOCK,
+        poll_fn=lambda client, programs: [ok_release, bad_release],
+        fetch_fn=fetch,
+        fresh_fn=lambda client, program, rd: True,
+    )
+    assert code == 1  # one failed, one succeeded
+    assert store.scan_observations("ces").collect().height > 0  # ces isolated from jolts failure

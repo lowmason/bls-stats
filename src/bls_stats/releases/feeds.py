@@ -43,8 +43,10 @@ _ANNUAL_RE = re.compile(r"\bMay (\d{4})\b")
 
 
 class FeedParseError(ValueError):
-    """Reserved for feed-level parse failures; entry-level issues are logged and skipped
-    instead (see `parse_feed`), so this is not currently raised."""
+    """Raised when a feed's body is not valid XML (e.g. a non-XML 200 response such as a
+    maintenance page). Entry-level issues are logged and skipped instead (see `parse_feed`);
+    this is reserved for feed-level failures that `poll` catches and treats like a fetch
+    failure — the feed is skipped for this run rather than aborting the whole poll."""
 
 
 @dataclass(frozen=True)
@@ -122,7 +124,10 @@ def parse_feed(xml_bytes: bytes, program: str) -> list[Release]:
         `Release` events sorted by `release_date` ascending. Empty if no entry parsed.
     """
     spec = REGISTRY[program]
-    root = ElementTree.fromstring(xml_bytes)
+    try:
+        root = ElementTree.fromstring(xml_bytes)
+    except ElementTree.ParseError as exc:
+        raise FeedParseError(f"{program}: feed body is not valid XML: {exc}") from exc
     releases: list[Release] = []
     for entry in root.iter(f"{ATOM}entry"):
         link = entry.find(f"{ATOM}link")
@@ -131,7 +136,11 @@ def parse_feed(xml_bytes: bytes, program: str) -> list[Release]:
         if not m:
             log.warning("%s: entry without parseable archive link (%r) — skipped", program, href)
             continue
-        release_date = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+        try:
+            release_date = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            log.warning("%s: entry with impossible archive date (%r) — skipped", program, href)
+            continue
         title = (
             (entry.findtext(f"{ATOM}title") or "") + " " + (entry.findtext(f"{ATOM}content") or "")
         )
@@ -183,10 +192,10 @@ def poll(client: httpx.Client, programs: list[str]) -> list[Release]:
     for url, progs in by_feed.items():
         try:
             body = get(client, url).content
-        except httpx.HTTPError as exc:
+            feed_releases = [r for p in progs for r in parse_feed(body, p)]
+        except (httpx.HTTPError, FeedParseError) as exc:
             log.warning("feed %s failed (%s) — programs %s skipped this run", url, exc, progs)
             continue
-        for p in progs:
-            out.extend(parse_feed(body, p))
+        out.extend(feed_releases)
     out.sort(key=lambda r: r.release_date)
     return out
