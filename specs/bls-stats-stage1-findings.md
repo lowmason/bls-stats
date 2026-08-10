@@ -655,7 +655,59 @@ argued, at Stage 5 (roadmap, issue 4).
 What settles it: "confirming the deployment endpoint's address and reachability from
 the container network," plus which §17.4 requirements the endpoint can satisfy.
 
-*(recorded by Task 6)*
+**Probe:** `probes/objstore_capabilities.py`, run 2026-08-10
+(`probes/results/objstore-workstation-dev-127.0.0.1-2026-08-10.json`). Contexts probed:
+`workstation-dev` only. The two deployment contexts (`workstation-deploy`, `container`)
+did not run this session — both are blocked on missing operator inputs, not a probe
+failure; see the issue-14 verdict below.
+
+| Capability (§17.4 / §1.4) | dev endpoint | deployment (workstation) | deployment (container) |
+|---|---|---|---|
+| Reachable + authenticated | ok — 2 buckets visible | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Conditional PUT (`If-None-Match`) | enforced (`PreconditionFailed`) | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Versioning | Enabled; 2 versions after two PUTs | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Object lock at bucket creation | Enabled | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Retention with a duration (GOVERNANCE/3650d) | accepted | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Locked-version delete denied | enforced (`InvalidRequest`) | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Delete-deny bucket policy enforced | NOT ENFORCED (root credential bypasses bucket policy) | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Lifecycle API | accepted, 1 rule readable | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| Replication API | API present, none configured (`ReplicationConfigurationNotFoundError`) | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+| PUT/HEAD/GET/LIST medians (1 KiB, ms) | 1.4 / 1.1 / 1.1 / 0.9 | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+
+**Issue 14 verdict:** not answerable in this run. Issue 14 asks for the deployment
+endpoint's address and its reachability from the container network; both of the
+execution-time inputs needed to answer that are missing on this workstation this
+session: (1) **deployment endpoint credentials** — `.project.env`'s `AWS_*` values name
+the dev MinIO endpoint (`127.0.0.1:9000`) only, and no other credential source exists
+here, so `workstation-deploy` could not run; (2) **a deployment-side container
+shell/runtime** — no `docker`, `podman`, or equivalent is on PATH, so the `container`
+context could not run either, independent of (1). Per the brief's own scoping, this task
+did not invent a deployment endpoint or install a container runtime to work around
+either gap. Consequently **§20 issue 14 does not close in this stage's current run**
+and stays open pending both operator inputs; the same gap means §17.3's writer-lease
+contention question ("in practice or only theoretically") is equally unanswered here,
+since it turns on the same deployment container-scheduling topology issue 14 asks
+about. The dev endpoint above must not stand in for either answer — §1.4 explicitly
+anticipates dev and deployment differing, so a dev-only result cannot be read as if it
+described the deployment.
+
+**§1.4 note honored:** only the dev endpoint was probed this session, so no
+dev-vs-deployment capability *divergence* was observed — that comparison is exactly
+what remains blocked. What this run does confirm is that the matrix is
+endpoint-agnostic by construction (same checks, same script, driven only by
+`AWS_ENDPOINT_URL`/credentials): once the two missing operator inputs are supplied,
+Steps 4 and 5 can run this same script unmodified and slot their output directly into
+the two blocked columns above. Nothing in later stages may rely on a capability only
+the dev endpoint is confirmed to have; `doctor` (Stage 7) reports this same matrix live
+against whichever endpoint is actually configured.
+
+**Credential note:** the probing credential is MinIO's root credential, and it
+**bypassed** the delete-deny bucket policy — `delete_deny_policy` reported "NOT
+ENFORCED for this credential (admin/root bypasses bucket policy?)". Stage 2 must
+provision a distinct non-admin runtime credential before first capture. This is a
+dev-endpoint observation only; whether the deployment endpoint's root credential
+behaves the same way is untested and remains open alongside the rest of the deployment
+columns.
 
 ## 6. Replication options — §20 issue 15, mechanism (Task 7)
 
