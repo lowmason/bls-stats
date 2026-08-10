@@ -714,14 +714,102 @@ columns.
 What settles it: "the deployment's replication decision" — options recorded here,
 `doctor`-confirmed at Stage 7.
 
-*(recorded by Task 7)*
+Requirement (§17.4, R7): an independent second copy of `raw/` + `log/fetch/`; any single-copy
+period longer than one release cycle is a standing finding (N12, reported by `doctor` from
+Stage 7). The mechanism is the deployment's choice — these are the options, recorded with a
+recommendation:
+
+| Option | Mechanism | Independence | Available here? | Notes |
+|---|---|---|---|---|
+| A. Provider-side replication | endpoint's bucket-replication API | independent media, same provider failure domain | **dev endpoint only** — `replication_api` check: "API present, none configured (`ReplicationConfigurationNotFoundError`)". **Deployment endpoint: unprobed** (§20 issue 14, blocked on missing deployment-endpoint credentials; Task 6's matrix ran the `workstation-dev` context only) — the dev result does not confirm or rule out A for the deployment endpoint (§1.4 anticipates the two differing) | lowest effort if present, but confirmation is still open |
+| B. Second endpoint + pull job | scheduled container job: paginated LIST diff + streaming copy to a second, different-provider endpoint | full provider independence | always buildable — it is the §16.1 adapter's `list`/`get`/`put` | strongest; job lands alongside Stage 2's capture loop or later |
+| C. Provider backup/snapshot feature | vendor-specific | varies | not probed — Task 6's capability matrix (`probes/objstore_capabilities.py`) has no vendor snapshot/backup check; unevaluated at either endpoint this stage | record only if A and B both unavailable |
+
+**Recommendation: conditional, not a single letter — the matrix that would decide between A and
+B is partial.** §20 issue 14 is open: Task 6 probed the `workstation-dev` context only; the
+deployment endpoint's `replication_api` result is unknown, and the dev endpoint's own result
+(API present, none configured) does not settle the question for deployment either way (§1.4).
+Decision rule for the operator (or `doctor`) to execute once the deployment matrix exists
+(finding 5's blocked `workstation-deploy`/`container` columns, or a live Stage 7 report):
+
+- **If** the deployment endpoint's `replication_api` check confirms a working, configurable
+  replication API **and** the resulting failure domain (independent media, same provider) is
+  judged acceptable → **choose A.**
+- **Otherwise** (API absent, unconfirmable, or the same-provider failure domain judged
+  insufficient against P1's "irreplaceable archive") → **choose B**, which needs no
+  endpoint-specific capability beyond the §16.1 adapter's `list`/`get`/`put` and is therefore
+  buildable and confirmable today regardless of what the deployment matrix eventually shows.
+
+**Default until that evidence exists: B.** It is the only option confirmed buildable this run;
+A is neither ruled in nor ruled out, only unconfirmed — treating dev-endpoint presence of the
+replication API as a deployment guarantee would be exactly the promotion §1.4 warns against.
+**Timing:** N12 starts accruing from first capture — the second copy should exist by the end of
+Stage 2, or the single-copy period is a known standing finding from day one, by choice.
+
+**Decision required (operator):** confirm the mechanism (and, for B, the second provider).
+Recorded as pending until the plan-completion gate; `doctor` (Stage 7) verifies whichever lands.
 
 ## 7. Archive-bucket creation parameters — §7.3, §17.4 (Task 7)
 
 Written **before any bucket exists**: object-lock retention is settable only at bucket
 creation (§7.3) — "the one storage decision that cannot be corrected later."
 
-*(recorded by Task 7)*
+Executed by Stage 2 **before the first capture**. §7.3: "the archive bucket must be created with
+immutability configured before the first byte lands … the one storage decision that cannot be
+corrected later."
+
+Two buckets (§17.4: whole-bucket policy statements; compaction rewrites kept clear of immutable
+objects):
+
+| Parameter | raw bucket `bls-stats-raw` | main bucket `bls-stats-main` |
+|---|---|---|
+| Contents | `raw/` only | `log/`, `ledger/`, `store/`, `ops/` |
+| Created | Stage 2, with every row below applied at creation | Stage 2 |
+| Versioning | Enabled — **dev endpoint (2026-08-10 probe):** `versioning` check: "status=Enabled, versions_after_two_puts=2". Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet; a §17.4 hard requirement must not rest on dev-endpoint evidence alone at execution time. | Enabled (same caveat) |
+| Object lock | `ObjectLockEnabledForBucket=true`; default retention **GOVERNANCE, 3650 days** (a mode *and* a duration — §17.4) | Off — §17.4 generation-swap GC must delete `gen=<n>/` |
+| Endpoint supports lock? | **dev endpoint (2026-08-10 probe): yes**, on every relevant check — `object_lock.create_enabled`: "Enabled"; `object_lock.default_retention_with_duration`: "default retention GOVERNANCE/3650d accepted (a *duration* — §17.4)"; `object_lock.put_retention` (per-object GOVERNANCE retention, the mechanism delete-denial depends on — no row in finding 5's table, JSON-only): "GOVERNANCE +90s on version d73a3374-e800-4092-a820-2c57bc31269a"; `object_lock.delete_denied`: "enforced (`InvalidRequest`)". **Caveat:** the probe labels *any* `ClientError` on the delete attempt as "enforced," and the code actually observed, `InvalidRequest`, is not an access-denial-specific code — so "locked-version delete denied" rests on weaker evidence than the label suggests. **This is dev-endpoint evidence only. Deployment endpoint: unprobed** (§20 issue 14, blocked on missing deployment credentials) — **re-verify against the deployment endpoint before Stage 2 executes this sheet**; a dev-endpoint capability must not be promoted to a deployment guarantee (§1.4). If the deployment endpoint turns out not to support object lock, §17.4's fallback becomes the *actual* parameter here: delete-deny alone, with the gap recorded as a standing finding at Stage 7. | — |
+| Delete policy | Deny `s3:DeleteObject` + `s3:DeleteObjectVersion` to `"AWS": "*"` on `arn:aws:s3:::bls-stats-raw/*` (JSON below); enforced for the runtime credential — **dev endpoint (2026-08-10 probe):** `delete_deny_policy` check: "NOT ENFORCED for this credential (admin/root bypasses bucket policy?) — Stage 2 needs a distinct runtime credential." The credential probed was MinIO's root/admin credential, and it bypassed its own bucket policy. **Stage 2 must provision a distinct non-admin runtime credential before first capture and re-run this check against that credential** — the root-credential result neither confirms nor denies enforcement for any other principal. Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet. | runtime credential MAY delete (generation GC) |
+| Lifecycle | **None. `raw/` never expires; no tiering** (§17.4, §1.4) | none initially |
+| Region / endpoint | as configured (`AWS_ENDPOINT_URL` — §1.4: never a constant) | same |
+
+Delete-deny policy for the raw bucket, verbatim:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyDeleteOnRaw",
+      "Effect": "Deny",
+      "Principal": {"AWS": ["*"]},
+      "Action": ["s3:DeleteObject", "s3:DeleteObjectVersion"],
+      "Resource": ["arn:aws:s3:::bls-stats-raw/*"]
+    }
+  ]
+}
+```
+
+**Why GOVERNANCE and not COMPLIANCE (recommendation):** COMPLIANCE retention cannot be shortened
+by anyone, including the account root — a mis-set duration is permanently unfixable, and the 2025
+lesson cuts both ways (irreversibility is the point *and* the risk). GOVERNANCE + the delete-deny
+policy gives two independent layers against the runtime credential, with admin
+governance-bypass as deliberate break-glass. P1's protection target is the *runtime* path — no
+operational code path may be able to delete a vintage.
+
+**Related context (credential hygiene, not a leak):** the dev MinIO root credential's access key
+ID is the same string as this project's published contact address (`probes/_lib.py`'s
+User-Agent contact fallback). An access key ID is a username, not a secret, and the secret key
+itself is clean — unrelated to that string, and it stays in `.project.env`, git-ignored per the
+Global Constraints — but it means that root identity is effectively public, which strengthens
+(does not by itself create) the non-admin-runtime-credential requirement stated above.
+
+**Decisions required (operator):**
+1. Lock mode + duration: GOVERNANCE/3650d recommended above — confirm or override.
+2. Final bucket names: `bls-stats-raw` / `bls-stats-main` are the defaults — confirm or rename
+   (names propagate into Stage 2's config, nowhere else yet).
+
+Both recorded as pending operator sign-off until the plan-completion gate, same as section 6's
+mechanism decision; Stage 2 executes this sheet only once both are confirmed.
 
 ## 8. Consequences for later stages (Task 8)
 
