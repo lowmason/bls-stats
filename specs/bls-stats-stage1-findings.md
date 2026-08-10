@@ -144,23 +144,40 @@ whole HTML ingest posture" — browser-shaped `httpx` sufficient, or headless ma
 Canary (compliant contact UA, one request): 200 — **updates** the review-§0.3 baseline.
 Review §0.3 (cited at spec §7.2: "`www.bls.gov` returns 403 to plain `httpx` even with a
 contact User-Agent") predicts 403 for exactly this shape of request. JSONL line 1 shows
-none: HTTP/2 200, no `server` header (no Akamai front-door signature), `content-length:
-84713` on the wire (`content-encoding: gzip`) decoding to 249986 bytes of genuine page —
-`body_head` opens `<title>Errata Home : U.S. Bureau of Labor Statistics</title>` with the
-real page's script includes (`dap.digitalgov.gov` analytics tag, `/javascripts/bls…`),
-not a challenge page. This is one request, to one URL (`/errata/`), on one date — it does
-not establish that the compliant contact UA passes every `www.bls.gov` path, and per this
-task's non-negotiable rule it was not repeated or extended to other surfaces to check. It
-is recorded here as exactly what it is: a single dated data point that contradicts the
-review-§0.3 baseline at this one URL, worth Stage 2 re-examining before committing to
-browser-shaped-only as the HTML profile's design (see Verdict).
+none: HTTP/2 200, no `server: AkamaiGHost` header (no Akamai *block-page* signature — this
+does not by itself prove the request bypassed Akamai's edge entirely, only that it did not
+receive an Akamai-generated block page), `content-length: 84713` on the wire
+(`content-encoding: gzip`) decoding to 249986 bytes of genuine page — `body_head` opens
+`<title>Errata Home : U.S. Bureau of Labor Statistics</title>` with the real page's script
+includes (`dap.digitalgov.gov` analytics tag, `/javascripts/bls…`), not a challenge page.
+
+**This is the most consequential result in this run, not a footnote.** The canary and the
+`errata_table` browser-shaped probe (JSONL lines 1 and 5) hit the *identical* URL
+(`https://www.bls.gov/errata/`), ~15 s apart, from the same client IP, inside the same
+script run: the canary (contact UA) got 200 with real content; the browser-shaped request
+to the same URL got 403 (Akamai block). That is a controlled, same-URL, same-run A/B in
+which the plainer, cheaper, more-honestly-labeled transport passed exactly where the
+transport §7.2 was designed around (browser-shaped headers, meant to *look* more
+legitimate) failed. The likelier explanation is a UA/TLS-fingerprint mismatch — `httpx`
+sending a header claiming Chrome 126 without Chrome's actual TLS/HTTP-2 handshake is a
+textbook bot-management trigger, whereas a UA that doesn't claim to be a browser isn't
+held to that consistency check — but the two arms also ran through separate
+`make_client()` contexts (separate TLS sessions) at different points in the six-request
+sequence, so **session position and IP-reputation drift across the run are not excluded**
+as alternative explanations; this run cannot distinguish between them. Either way, this is
+one request, to one URL, on one date — it does not establish that the compliant contact UA
+passes every `www.bls.gov` path, and per this task's non-negotiable rule it was not
+repeated or extended to other surfaces to check. It is recorded here as exactly what it
+is: a single dated data point that contradicts the review-§0.3 baseline at this one URL,
+and that undercuts the premise §7.2's mitigation ordering itself was built on (see
+Verdict).
 
 | Surface | Browser-shaped status | Marker found | Posture |
 |---|---|---|---|
 | robots.txt | 403 | False | Blocked. `body_head` is an Akamai "Access Denied" page (`server: AkamaiGHost`, 1323 bytes, `Cache-Control: no-cache, no-store, must-revalidate`), not a robots.txt document — no Disallow rules are observable from this run. |
 | `.ics` schedule feed | 403 | False | Blocked. Identical 1323-byte Akamai block page. |
 | Atom release feed (`empsit.rss`) | 403 | False | Blocked. Identical 1323-byte Akamai block page. Because the surface never returned real content, this run also does not settle whether the pinned `<feed` marker (Atom's root element) is even the right string for a URL path named `.rss` — that question stays open behind the block. |
-| errata table (`/errata/`) | 403 | **True** (false positive) | Blocked. Same Akamai block page as the other five — its body happens to open with `<html lang="en-us">`, which satisfies the pinned `<html` marker even though no errata content was served. `marker_found: True` here is misleading in isolation; `status != 200` is what correctly keeps this surface out of "passing" per the script's own `blocked` logic. |
+| errata table (`/errata/`) | 403 | **True** (false positive) | Blocked under browser-shaped headers. Same Akamai block page as the other five — its body happens to open with `<html lang="en-us">`, which satisfies the pinned `<html` marker even though no errata content was served. `marker_found: True` here is misleading in isolation; `status != 200` is what correctly keeps this surface out of "passing" per the script's own `blocked` logic. **But** the compliant contact-UA canary (JSONL line 1) hit this exact URL in the same run and got 200 with genuine content — see the canary paragraph above. Of all six surfaces, this is the one with direct same-run evidence that a cheaper transport than headless already works here. |
 | news-release index | 403 | **True** (false positive) | Blocked, same false-positive marker mechanism as errata table. |
 | schedule index | 403 | **True** (false positive) | Blocked, same false-positive marker mechanism as errata table. |
 
@@ -175,21 +192,45 @@ weak marker could pass falsely — worth a harder marker (e.g. a phrase only the
 contains) if Stage 2 ever re-probes these surfaces, though per this task's rules the
 pinned script here is left as run, not edited.
 
-**Verdict (issue 1):** headless backend MANDATORY for: robots.txt, `.ics` schedule feed,
-Atom release feed, errata table, news-release index, schedule index — Stage 2 must
-include the §7.2-mitigation-3 worker for all six probed surfaces. This matches the
-script's own mechanical summary line (`HEADLESS BACKEND MANDATORY for: robots_txt,
-ics_schedule, atom_feed, errata_table, newsrels_index, schedule_index`) — no divergence
-between the mechanical check and the considered read once the three false-positive
-markers are accounted for (they don't change which surfaces cleared `status == 200`,
-which none did). Note: this is a WAF property observed on 2026-08-10; §18.3 forbids
-treating it as stable — the posture is re-checked whenever an HTML surface starts failing
-in operation. The canary result above is the reason this verdict is narrower than it
-looks: browser-shaped `httpx` is blocked everywhere it was tried today, but the one
-contact-UA request tried today was *not* blocked, on the one path it hit. Stage 2 should
-not read this as "compliant contact UA works for HTML" — that would over-generalize a
-single request — but it is a concrete, cheap thing worth a dedicated follow-up probe
-before committing engineering effort to a headless worker for all six surfaces.
+**Verdict (issue 1):** **established** — browser-shaped `httpx`, configured exactly as
+`_lib.BROWSER_HEADERS` configures it, is blocked (403, uniform Akamai block page) on all
+six probed surfaces on 2026-08-10: robots.txt, `.ics` schedule feed, Atom release feed,
+errata table, news-release index, schedule index. §7.2 mitigation 2, as currently
+implemented, fails on every surface this run tried it against.
+
+**Not established:** that §7.2 mitigation 3 (the headless `HtmlFetcher` backend) is
+therefore the necessary next step. This is where this finding **diverges from the
+script's own mechanical line** (`HEADLESS BACKEND MANDATORY for: robots_txt,
+ics_schedule, atom_feed, errata_table, newsrels_index, schedule_index`), and the
+divergence is structural, not a disagreement about the facts: the script's `blocked`
+predicate is computed only over `browser` (`[r for r in records if r["surface"] !=
+"canary_contact_ua"]`) — by construction it can never see the canary, so it has no way to
+notice that the canary passed the *identical* `/errata/` URL that the browser-shaped
+request to that same URL failed on, in the same run, ~15 s apart, from the same IP (see
+the canary paragraph and the errata-table table row above). The mechanical line correctly
+answers "did mitigation-2-as-configured pass" (no, on all six); it is not designed to
+answer, and does not answer, "is mitigation-3 the correct engineering response" — that
+second question is exactly what a same-URL contact-UA pass undercuts. §7.2's own ordering
+was built on review §0.3's premise that plain/contact-UA `httpx` also 403s
+`www.bls.gov` — this run's canary contradicts that premise at one path, which weakens the
+case for jumping straight to the *last* rung of the ladder without first testing a much
+cheaper one.
+
+**Recommended before Stage 2 commits to building the headless worker:** a single,
+separate follow-up probe — one contact-UA GET per remaining surface (5 requests, same
+2 s spacing, same one-shot discipline as this task) — to see whether the compliant
+contact UA that passed `/errata/` today also passes robots.txt, the `.ics` feed, the Atom
+feed, the news-release index, and the schedule index. If it does, §7.2's ladder may stop
+at "use the contact-UA profile for `html` surfaces too" rather than at headless — a
+substantially cheaper Stage 2 outcome than standing up and operating a browser-automation
+worker. If it does not, the case for mitigation 3 becomes solid rather than assumed.
+Pending that follow-up, this run's only unqualified, decisive finding is that
+**mitigation 2 as currently configured is not sufficient anywhere it was tried**; whether
+mitigation 3 is mandatory, or whether a policy change to the `html` profile's UA would
+have sufficed, is the open question this run leaves for that next probe to close. Note:
+all of the above is a WAF property observed on 2026-08-10; §18.3 forbids treating it as
+stable — the posture is re-checked whenever an HTML surface starts failing in operation,
+and the recommended follow-up probe should itself be dated when it runs.
 
 **robots.txt — the cross-task item.** Task 2 found `download.bls.gov/robots.txt` returns
 404 (no document at that path; specs/bls-stats-stage1-findings.md §1). This run's
