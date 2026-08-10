@@ -247,6 +247,175 @@ tested so far — this run neither confirms nor rules out a published policy at
 `/errata/`, per this task's one-canary rule — and is a candidate for a future, separate,
 single-request probe rather than a retry within this one.)
 
+### Addendum — contact-profile pass over the remaining five surfaces (2026-08-10)
+
+**Why this addendum exists.** The run above leaves a hole, not a posture: only one of six
+`www.bls.gov` surfaces (`/errata/`, via the canary) has a *passing* contact-profile data
+point — the browser-shaped profile is blocked on all six, and the contact profile is
+untested on the other five. `probes/transport_html_contact.py` (new file;
+`probes/transport_html.py` and `probes/_lib.py` untouched) fills that hole: it probes the
+remaining five surfaces once each — not `/errata/`, which already has a result — using
+`_lib.make_client()` (the contact profile) exclusively, ordered robots.txt → `.ics` →
+release feed → newsrels index → schedule index, ≥2 s apart, run once. (The prior run's
+`atom_feed` surface key and this addendum's `release_feed` key name the same URL,
+`/feed/empsit.rss`.)
+
+**Confounds this addendum's design targets, not resolves.** Two confounds make any "the
+User-Agent caused the block" reading unsupported by either run:
+
+1. **Five headers differ at once**, not one: `_lib.CONTACT_HEADERS` and
+   `_lib.BROWSER_HEADERS` differ in `User-Agent`, `Accept`, `Accept-Language` (absent vs.
+   present), `Accept-Encoding` (`gzip` vs. `gzip, deflate, br`), and
+   `Upgrade-Insecure-Requests` (absent vs. present) — and a request claiming Chrome 126
+   while sending none of `sec-ch-ua`, `sec-ch-ua-platform`, or `Sec-Fetch-*` is internally
+   inconsistent on its face. Nothing below isolates which of these matters. Mechanism is
+   untested and stays untested by this addendum.
+2. **Sequence position is confounded with profile** in the run above: the single pass was
+   request #1, every block was #2–#7. This addendum's design (robots.txt first, `position`
+   recorded on every record) is built to let that confound be read off the results, not to
+   eliminate it.
+
+**Probe:** `probes/transport_html_contact.py`, run 2026-08-10, ~15 minutes after the run
+above (`probes/results/transport_html_contact-2026-08-10.jsonl`).
+
+| Pos | Surface | Status | What `body_head`/`body_text` actually contained | Posture |
+|---|---|---|---|---|
+| 1 | robots.txt | 200 | Genuine robots.txt (full body kept via `keep_body=True`): two `User-agent` blocks (`archive.org_bot` and `*`) with `Disallow` paths and a `Sitemap:` line. `content-type: text/plain`, no `server` header. Real policy, not a block page. | **Pass** |
+| 2 | `.ics` schedule feed | 200 | Genuine ICS calendar: opens `BEGIN:VCALENDAR`, `PRODID:-//Department of Labor//Bureau of Labor Statistics//EN`. `content-type: text/calendar`. | **Pass** |
+| 3 | release feed (`empsit.rss`) | 200 | `<?xml version='1.0' encoding='UTF-8'?><feed xmlns="http://www.w3.org/2005/Atom">…<title>Employment Situation</title>…` — a well-formed Atom document, served with `content-type: application/rss+xml` on the wire despite the `.rss` path and the Atom body. This settles the flavor question for *this response*, on this date, under the *contact* profile: the pinned `transport_html.py`'s `<feed` marker would have matched had the browser-shaped request to this same URL not been blocked before returning a body — but that request never returned a body, so this run has no observation of what the browser-shaped profile would have been served, and BLS pairing an Atom body with an `application/rss+xml` content-type is exactly the kind of inconsistency that argues for Stage 2 parsing this feed defensively (checking for either root element) rather than keying ingestion on the `.rss` path or the content-type header. | **Pass** |
+| 4 | news-release index | 200 | Real BLS index page: `<title>Economic News Releases :  U.S. Bureau of Labor Statistics</title>`, same site template/analytics includes as the errata canary. | **Pass** |
+| 5 | schedule index | 200 | 302 redirect from `/schedule/` to `/schedule/2026/08_sched.htm`, then 200. Real page: `<title>Schedule of Selected Releases for August 2026</title>`, same `dap.digitalgov.gov` analytics tag and `/javascripts/bls-…` includes as every other genuine BLS page in this dataset. **The script's own marker (`"U.S. Bureau of Labor Statistics"`) did not match** — this page's `<title>` doesn't carry the site-wide suffix the other pages use — so the script recorded `outcome: "other"`, not `"pass"`. Direct inspection of `body_head` shows unambiguous genuine content, not a block page (`looks_like_block_page: false`, no `server: AkamaiGHost`, no "Access Denied" signature). Recorded as a pass on inspection, overriding the script's own marker miss. | **Pass** (on inspection; script recorded `other`) |
+
+All five requests returned HTTP 200 with genuine BLS content; **zero Akamai-style blocks
+occurred in this run.** None of the five responses carried a `server` header.
+
+**robots.txt content and its bearing on this project's paths (R12, live compliance
+item).** The document has two `User-agent` blocks:
+
+- `User-agent: archive.org_bot` (specific): `Disallow` on `/include`, `/scripts`, `/crs`,
+  `/_private`, `/iisadmin`, `/srchadm`, `/advisory/members/`, `/idcf`, `/*print*`,
+  `/schedule/archives/`, `/*.PDF$`, `/data.json`.
+- `User-agent: *` (generic — the block that applies to this project's UA, which is not
+  `archive.org_bot`): `Disallow` on `/scripts`, `/crs`, `/_private`, `/iisadmin`,
+  `/srchadm`, `/advisory/members/`, `/idcf`, `/*print*`.
+
+None of the six `www.bls.gov` paths this project's probes have used to date
+(`/robots.txt`, `/schedule/news_release/bls.ics`, `/feed/empsit.rss`, `/errata/`,
+`/bls/newsrels.htm`, `/schedule/` and its `/schedule/2026/08_sched.htm` redirect target)
+match any `Disallow` prefix in the generic block. (`/schedule/archives/` is disallowed
+only under the `archive.org_bot`-specific block; it does not apply to the generic rule and
+is not a path this project fetches.) **Under the generic `User-agent: *` rule published at
+`www.bls.gov` on 2026-08-10, none of the six paths this task actually probed are
+disallowed.**
+
+**Scope of this clearance — it covers the six probed paths, not every `html`-profile
+surface §7.1/§11.3 name.** The spec references at least three more `www.bls.gov` surfaces
+this task did not probe: the archived news-release index
+(`https://www.bls.gov/bls/news-release/home.htm`, spec §11.3), per-release archive links
+(`.../archives/{slug}_MMDDYYYY.htm`, spec §11.3 — the exact path prefix isn't pinned down
+enough in the spec to check against the `/schedule/archives/`-style `Disallow` entries
+above, so this is left explicitly unverified rather than assumed clear), and per-program
+dated notices pages (e.g. `https://www.bls.gov/cex/notices/2025/ce-2024-reschedule.htm`,
+spec §12.5, one example of a path pattern that varies by program). None of these were
+requested by either run in this stage. Stage 2 should check any additional `html`-profile
+path actually used against this robots.txt (or a re-fetched one, per the §18.3 point-in-time
+caveat) before relying on it — this finding does not extend blanket clearance to `html`
+surfaces beyond the six listed above.
+
+Host scoping, stated precisely per this task's instruction: this policy is published *at*
+`www.bls.gov` and states a policy for `www.bls.gov` only. It says nothing about
+`download.bls.gov` (Task 2 found no `robots.txt` at that path at all — a plain 404, not a
+block, not a policy) or `data.bls.gov` (still unprobed for `robots.txt`). The R12
+robots-policy question is now answered for `www.bls.gov` and remains open for the other
+two hosts.
+
+**Confound 2 (sequence position) — direct read.** This run recorded zero blocks at any of
+the five positions, all within a single continuous contact-profile session (one
+`make_client()` context reused for every request, ≥2 s apart; position 5's `probed_at` is
+8 s after position 1's) — the same request cadence as the six browser-shaped requests in
+the run above, none of which passed. The pattern does **not** track sequence position the
+way the prior run's did: there, blocks began at position 2 and continued through position
+7 regardless of profile detail; here, position 5 (the deepest position probed in this
+session) passed cleanly, same as position 1. This is inconsistent with a pure "anything
+after the first request in a session gets blocked" rule holding *independent of profile*,
+and it is further undercut by a fact already recorded in the run above: `robots_txt` under
+the browser-shaped profile was itself the very first request of its own client session
+(JSONL line 2 of `transport_html-2026-08-10.jsonl`, ~2 s after the canary) and was still
+blocked — so "the first request of a session always passes" was never true either. Taken
+together, the explanation most consistent with both runs' data is that something
+correlated with **profile** (which, per confound 1, could be the User-Agent, one of the
+other four differing headers, the internal Chrome-claim inconsistency, or some
+combination — this addendum does not and cannot distinguish among them) is doing the
+work, not raw position-in-sequence alone. **What this run does not do:** it never ran a
+single session that *interleaves* the two profiles request-by-request against the same
+URLs, which is the one design that would cleanly separate "profile" from "position" as
+rival explanations rather than merely making the position-only explanation less
+parsimonious. That interleaved design is the natural next probe if full separation is
+wanted.
+
+**Observation, recorded without theorizing about it (per this task's instruction):** every
+genuine-content response across both runs — the original canary and all five of this
+addendum's passes — carried no `server` response header. Every one of the six
+Akamai-block responses in the run above carried `server: AkamaiGHost`. No mechanism claim
+follows from this; it is recorded as a consistent, repeated correlation across seven
+successful and six blocked responses on this date.
+
+**Correction to the "most consequential result" paragraph above (added by this
+addendum).** That paragraph states: *"The likelier explanation is a UA/TLS-fingerprint
+mismatch — `httpx` sending a header claiming Chrome 126 without Chrome's actual TLS/HTTP-2
+handshake is a textbook bot-management trigger…"* That sentence is withdrawn as written —
+not deleted from the record above, but disclaimed here: it names a causal mechanism
+(fingerprint mismatch) that neither that run nor this addendum tested, and the hedge later
+in the same paragraph ("this run cannot distinguish between them") does not fully cancel
+having named a "likelier" cause first. Per confound 1 above, five headers differ between
+the two profiles simultaneously, plus an internal Chrome-claim inconsistency; no result in
+either run isolates the User-Agent, the TLS/HTTP-2 handshake, or any other single header as
+the operative variable. The paragraph's underlying *observation* (a same-URL, same-run A/B
+where contact passed and browser-shaped failed) stands unmodified; the causal explanation
+offered for it does not, and is treated from this addendum forward as untested.
+
+**Verdict (issue 1) — revised after this addendum.** The verdict recorded above answered
+one question decisively — mitigation 2, as currently configured, fails on every surface
+tried — and left a second question open: whether mitigation 3 (headless) is the necessary
+next step. This addendum answers the second question with new evidence, though not
+completely:
+
+- **Established, both runs combined:** on 2026-08-10, the browser-shaped profile exactly
+  as `_lib.BROWSER_HEADERS` configures it was blocked (403, uniform Akamai block page) on
+  all six probed `www.bls.gov` surfaces. The contact profile exactly as
+  `_lib.CONTACT_HEADERS` configures it returned HTTP 200 with genuine content on all six
+  distinct `www.bls.gov` surfaces tried across both runs (`/errata/` via the canary; the
+  other five via this addendum) — a clean, uniform result with zero exceptions on either
+  side.
+- **Not established:** *why*. Confound 1 (five headers plus an internal inconsistency)
+  means no claim about the User-Agent specifically, about TLS/HTTP-2 fingerprinting, or
+  about "browser-shaped headers are counterproductive," follows from this data — those are
+  mechanism claims this addendum was explicitly scoped not to make.
+- **Confound 2, substantially weakened but not eliminated:** this addendum's all-contact,
+  five-position session produced zero blocks at any position, including its deepest
+  position (5) — unlike the run above, where blocks began at position 2 regardless of
+  profile detail and even a position-1-of-a-fresh-session request under the browser-shaped
+  profile was blocked. Sequence position alone, independent of profile, does not explain
+  both runs' data as well as it explains either run in isolation. A fully decisive test —
+  interleaving both profiles within one session against the same URLs — was not run and is
+  the concrete next step if the residual ambiguity needs closing.
+
+**Where this leaves issue 1: partly settled.** For Stage 2's actual engineering
+decision — does `html`-profile ingest need a headless-browser fetcher backend (§7.2
+mitigation 3), or does the existing, cheaper contact profile suffice — the evidence built
+across both runs supports building `html` transport on the contact profile and leaving
+mitigation 3 unbuilt-and-pluggable, rather than defaulting straight to headless: six for
+six surfaces passed under the contact profile, six for six failed under the browser-shaped
+profile, on the same date, with confound 2 weakened (not eliminated) by this addendum's
+own within-session evidence. This is not the same as calling issue 1 fully closed: the
+mechanism is untested (confound 1) and the position/profile separation is incomplete
+(confound 2). What would settle the remainder: (a) a same-session, interleaved-profile
+probe against the same URLs, to cleanly separate profile from position as explanations;
+(b) a repeat of both profiles on a different date — §18.3 governs here exactly as it did
+above, this is WAF behavior observed on 2026-08-10, not a stable property, and the posture
+must be re-checked before being hard-coded as a permanent assumption or the moment an
+`html` surface starts failing in production.
+
 ## 4. QCEW singlefile sizes — §20 issue 4, sizes half (Task 5)
 
 What settles it: "actual byte sizes … the review's size figures are third-party."
