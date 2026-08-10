@@ -11,13 +11,38 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import time
 from pathlib import Path
 
 import httpx
 
+
+def _load_project_env(path: Path) -> None:
+    """Minimal .env loader (KEY=VALUE lines; comments and blanks skipped).
+    Existing environment always wins — exported vars are never overridden.
+    Dependency-free on purpose: uv resolves deps from the *entry* script's
+    PEP 723 block, so a python-dotenv import here would force the dep into
+    every probe's header."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+_load_project_env(Path(__file__).parent.parent / ".project.env")  # repo root; absent in worktrees
+
 # §7.1/R12: a descriptive, contactable UA is mandatory from the first request.
-CONTACT_UA = "bls-stats-probe/0.1 (data-archival research; contact: mason.lowell@mac.com)"
+# Contact address comes from .project.env (BLS_CONTACT_EMAIL); the fallback keeps
+# the probes compliant if the env file is absent (e.g. an isolated worktree).
+CONTACT_UA = (
+    "bls-stats-probe/0.1 (data-archival research; contact: "
+    f"{os.environ.get('BLS_CONTACT_EMAIL', 'mason.lowell@mac.com')})"
+)
 
 # §7.2 mitigation 2: browser-shaped headers for the html profile.
 BROWSER_HEADERS = {
@@ -102,4 +127,14 @@ if __name__ == "__main__":
     p = write_results("selfcheck", [{"ok": True}])
     assert p.read_text(encoding="utf-8") == '{"ok": true}\n'
     p.unlink()
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as tf:
+        tf.write("# comment\nFOO_PROBE=bar\n")
+    os.environ["FOO_PROBE"] = "kept"
+    _load_project_env(Path(tf.name))
+    assert os.environ["FOO_PROBE"] == "kept", "existing env must win over the file"
+    del os.environ["FOO_PROBE"]
+    _load_project_env(Path(tf.name))
+    assert os.environ.pop("FOO_PROBE") == "bar", "file value not loaded"
+    Path(tf.name).unlink()
     print("_lib self-check OK")
