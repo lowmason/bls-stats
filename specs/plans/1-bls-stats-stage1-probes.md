@@ -42,8 +42,9 @@ Copied from the spec; every task's requirements include these.
 - **No real bucket is created in this stage.** §7.3: object-lock immutability is settable only at
   bucket creation, so the real buckets are created in Stage 2 *from the Task-7 parameter sheet*.
   Probe buckets are prefixed `bls-stats-probe-` and deleted before the probe exits.
-- No secrets in committed output: results record endpoint hostnames, never credentials;
-  `BLS_API_KEY` must never appear in `probes/results/`.
+- No secrets in committed output: results record endpoint hostnames, never credentials. Local
+  secrets live in repo-root `.project.env` (git-ignored — verify it stays untracked); nothing
+  from it may appear in `probes/results/`, the findings document, or any commit.
 - Every finding is dated (results filenames carry ISO dates; each record carries `probed_at`).
   Service behavior is point-in-time — a result is evidence for its date, not a stable fact.
 - Commit messages: plain imperative mood, matching the existing log (no `feat:` prefixes).
@@ -52,22 +53,24 @@ Copied from the spec; every task's requirements include these.
 
 0. **Task 6, development endpoint (known — this workstation, verified 2026-08-10):** MinIO
    (Homebrew) runs via the LaunchAgent `~/Library/LaunchAgents/com.lowell.minio.plist`, serving
-   `/Users/lowell/S3` at `http://localhost:9000` (console `:9001`), modern single-drive layout
+   `/Users/lowell/S3` at `http://127.0.0.1:9000` (console `:9001`), modern single-drive layout
    (`.minio.sys` present). No `bls-stats` bucket exists yet — correct: Stage 2 creates the real
-   buckets from Task 7's sheet. For the probe, export `AWS_ENDPOINT_URL=http://localhost:9000`
-   and set `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from the plist's `EnvironmentVariables`
-   (`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` — read with
-   `plutil -p ~/Library/LaunchAgents/com.lowell.minio.plist`; never commit the values). This is
-   the **root** credential, so expect the delete-deny check to report NOT ENFORCED for it — that
-   is the §17.4 finding that Stage 2 needs a distinct non-admin runtime credential, not a probe
-   bug. Probe buckets will appear as `/Users/lowell/S3/bls-stats-probe-*` and are deleted;
-   existing buckets (`alt-nfp`, `bls-stats-old`) are never touched.
+   buckets from Task 7's sheet. The dev-endpoint env (`AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`,
+   `AWS_SECRET_ACCESS_KEY`) lives in repo-root `.project.env`: load it with
+   `set -a; source .project.env; set +a` before the dev run. It is the **root** credential, so
+   expect the delete-deny check to report NOT ENFORCED for it — that is the §17.4 finding that
+   Stage 2 needs a distinct non-admin runtime credential, not a probe bug. Probe buckets will
+   appear as `/Users/lowell/S3/bls-stats-probe-*` and are deleted; existing buckets (`alt-nfp`,
+   `bls-stats-old`) are never touched. `.project.env` is git-ignored, so an isolated worktree
+   checkout lacks it — copy it from the main checkout or export the vars manually.
 1. **Task 6, deployment endpoint:** `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`,
-   `AWS_SECRET_ACCESS_KEY` (and `AWS_REGION` if not `us-east-1`).
+   `AWS_SECRET_ACCESS_KEY` (and `AWS_REGION` if not `us-east-1`). Not in `.project.env` — its
+   `AWS_*` values are the dev MinIO above.
 2. **Task 6:** shell access to a deployment-side dev container (§20 issue 14 is precisely
    "reachable from the container network?").
-3. **Task 3 (optional):** `BLS_API_KEY` (registered v2 key). Without it the probe runs the v1
-   unregistered path and records that the registered path is untested.
+3. **Task 3:** `BLS_API_KEY` (registered v2 key) is present in `.project.env` and auto-loads via
+   `_lib` — expect the v2 registered path to be tested. If the probe reports it skipped, the env
+   file was not found (worktree caveat in input 0).
 4. **Task 7:** operator sign-off on two recorded decisions — object-lock mode/duration, and the
    replication mechanism. The task drafts both with recommendations; the sign-off may be batched
    at the completion gate.
@@ -98,6 +101,8 @@ the same findings file). Task 7 needs Task 6's matrix. Task 8 needs everything.
     `body_head` (first 500 chars) and, iff `keep_body`, full `body_text`.
   - `_lib.write_results(script: str, records: list[dict]) -> Path` — JSONL to
     `probes/results/<script>-<YYYY-MM-DD>.jsonl`.
+  - On import, `_lib` loads repo-root `.project.env` (existing env always wins) — supplying
+    `BLS_CONTACT_EMAIL` (for the §7.1 contact UA) and `BLS_API_KEY` to Tasks 2–5.
 - Produces (used by Tasks 2–8): the findings skeleton, one numbered section per probe.
 
 - [ ] **Step 1: Write `probes/_lib.py`**
@@ -116,13 +121,38 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import time
 from pathlib import Path
 
 import httpx
 
+
+def _load_project_env(path: Path) -> None:
+    """Minimal .env loader (KEY=VALUE lines; comments and blanks skipped).
+    Existing environment always wins — exported vars are never overridden.
+    Dependency-free on purpose: uv resolves deps from the *entry* script's
+    PEP 723 block, so a python-dotenv import here would force the dep into
+    every probe's header."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+_load_project_env(Path(__file__).parent.parent / ".project.env")  # repo root; absent in worktrees
+
 # §7.1/R12: a descriptive, contactable UA is mandatory from the first request.
-CONTACT_UA = "bls-stats-probe/0.1 (data-archival research; contact: mason.lowell@mac.com)"
+# Contact address comes from .project.env (BLS_CONTACT_EMAIL); the fallback keeps
+# the probes compliant if the env file is absent (e.g. an isolated worktree).
+CONTACT_UA = (
+    "bls-stats-probe/0.1 (data-archival research; contact: "
+    f"{os.environ.get('BLS_CONTACT_EMAIL', 'mason.lowell@mac.com')})"
+)
 
 # §7.2 mitigation 2: browser-shaped headers for the html profile.
 BROWSER_HEADERS = {
@@ -207,6 +237,16 @@ if __name__ == "__main__":
     p = write_results("selfcheck", [{"ok": True}])
     assert p.read_text(encoding="utf-8") == '{"ok": true}\n'
     p.unlink()
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as tf:
+        tf.write("# comment\nFOO_PROBE=bar\n")
+    os.environ["FOO_PROBE"] = "kept"
+    _load_project_env(Path(tf.name))
+    assert os.environ["FOO_PROBE"] == "kept", "existing env must win over the file"
+    del os.environ["FOO_PROBE"]
+    _load_project_env(Path(tf.name))
+    assert os.environ.pop("FOO_PROBE") == "bar", "file value not loaded"
+    Path(tf.name).unlink()
     print("_lib self-check OK")
 ```
 
@@ -547,9 +587,11 @@ Expected: `compiles`
 
 - [ ] **Step 3: Live run**
 
-Run: `uv run probes/transport_api.py` (with `BLS_API_KEY` exported if available)
-Expected: `v1: http=200 api_status=REQUEST_SUCCEEDED datapoints=<n≥1> messages=[...]` then
-`API SURFACE CONFIRMED by payload inspection`. A v1 `message` array that is non-empty on a
+Run: `uv run probes/transport_api.py` (`BLS_API_KEY` auto-loads from `.project.env` via `_lib`)
+Expected: `v1: http=200 api_status=REQUEST_SUCCEEDED datapoints=<n≥1> messages=[...]`, a
+`v2: http=200 api_status=REQUEST_SUCCEEDED datapoints=<n≥1>` line, then
+`API SURFACE CONFIRMED by payload inspection`. A `v2: skipped` line means `.project.env` was not
+found (worktree caveat, execution-time input 0). A v1 `message` array that is non-empty on a
 successful request is normal (v1 nags about registration) — that is exactly the point being
 demonstrated. If `success_by_payload` is false with http=200, record it verbatim: that is §7.1's
 trap observed live.
@@ -1139,9 +1181,13 @@ no network touched.
 
 - [ ] **Step 3: Run against the development endpoint (local MinIO — see execution-time input 0)**
 
-Run, with the env from execution-time input 0 exported (endpoint `http://localhost:9000`,
-credentials from the LaunchAgent plist):
-`uv run probes/objstore_capabilities.py --context workstation-dev`
+Run — dev env is deliberately shell-sourced, not auto-loaded: this script stays env-pure so a
+deployment run can never silently inherit the dev endpoint from the file:
+
+```bash
+set -a; source .project.env; set +a
+uv run probes/objstore_capabilities.py --context workstation-dev
+```
 Expected: one line per check ending in `results: probes/results/objstore-workstation-dev-...json`
 plus the JSON matrix; both probe buckets report `cleaned up` (they materialize under
 `/Users/lowell/S3/` while they exist). The ~95 s wait for the lock retention to lapse is normal.
@@ -1152,7 +1198,8 @@ convenience; the deployment matrix is the load-bearing one.
 
 - [ ] **Step 4: Run against the deployment endpoint, from the workstation**
 
-Run, with the deployment endpoint's env exported:
+Run, with the deployment endpoint's env exported — in a fresh shell; do **not** source
+`.project.env` here (its `AWS_*` values are the dev MinIO):
 `uv run probes/objstore_capabilities.py --context workstation-deploy`
 Expected: as Step 3. This isolates endpoint capabilities from container networking, so a Step-5
 failure is attributable to the network path, not the endpoint.
