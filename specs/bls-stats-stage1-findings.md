@@ -86,8 +86,9 @@ implies) one.
 
 ## 2. API surface — §7.1 `api` profile (Task 3)
 
-What settles it: structural success checking demonstrated live — HTTP 200 and
-`REQUEST_SUCCEEDED` are not success signals.
+What settles it: whether the `api` profile reaches `api.bls.gov`, authenticates with a
+registered key, and §7.1's payload-inspection code path runs end-to-end — not a live
+demonstration of HTTP-status/payload divergence, which this run did not produce.
 
 **Probe:** `probes/transport_api.py`, run 2026-08-10
 (`probes/results/transport_api-2026-08-10.jsonl`).
@@ -99,22 +100,39 @@ What settles it: structural success checking demonstrated live — HTTP 200 and
 | v1 `message[]` | `[]` (empty — no registration nag on this run) |
 | v1 per-series datapoints | 31 (1 series, `CES0000000001`, HTTP/2, `content-encoding: gzip`) |
 | v2 registered POST | HTTP 200; `status` `REQUEST_SUCCEEDED`; `message[]` `[]`; 1 series, 24 datapoints (HTTP/2, `content-encoding: gzip`) |
+| HTTP-vs-payload divergence | **Not observed on this run.** Both requests agreed across every signal (200, `REQUEST_SUCCEEDED`, non-empty data, empty `message[]`) — no case arose where HTTP-level and payload-level success disagreed. §7.1's not-sufficient rule is prior design content (see Verdict), not something this run demonstrated. |
 
-**Verdict:** the `api` profile reaches api.bls.gov; success is only determinable by
-payload inspection (`message[]` + per-series data), confirming §7.1's rule in the sense
-that HTTP 200 and a top-level `status: REQUEST_SUCCEEDED` are necessary but not
-sufficient — the probe's `payload_verdict` explicitly parses `Results.series` and sums
-each series' `data[]` before calling anything a success, and only that check
-(`success_by_payload`) is what the script trusts. On this run both v1 and v2 also passed
-that structural check (31 and 24 datapoints respectively), and `message[]` happened to
-be empty on both — the commonly-cited v1 registration nag did not fire this time, so
-this run does not exhibit a non-empty-`message`-despite-success case, but it does not
-need to: the rule under test is that the payload must be inspected regardless of what
-`message[]` contains, not that `message[]` is always non-empty. Registered-key path
-tested: a key is on hand (`.project.env`, git-ignored) and was exercised live via one v2
-POST, spending one query against its daily quota. Key registration (annual expiry,
-§7.1 alert requirement) is a Stage-2 setup item; the key itself is already provisioned
-and working as of this probe.
+**Verdict:** on 2026-08-10, both requests — the v1 unregistered GET and the v2
+registered POST — returned HTTP 200, `status: REQUEST_SUCCEEDED`, non-empty per-series
+data (31 and 24 datapoints respectively), and an empty `message[]`. HTTP-level and
+payload-level signals agreed on both requests; no divergence between them was witnessed
+on this run.
+
+What this run does establish, plainly: the `api` profile reaches `api.bls.gov` and
+completes requests over it (both records: HTTP/2, `content-encoding: gzip`, series data
+returned). The registered v2 path works with a key on hand — the POST carrying the key
+returned 1 series and 24 datapoints with an empty `message[]` and no auth-related
+message, i.e. the key was accepted (`.project.env`, git-ignored; exercised live,
+spending one query against its daily quota). And the payload-inspection code path
+itself executed end-to-end: `payload_verdict()` parses `Results.series`, sums each
+series' `data[]`, and records `message[]` into every JSONL line; `success_by_payload`
+is computed from series presence and datapoint count (`bool(series) and n_points > 0`),
+not from HTTP status — that logic ran and produced a verdict from the payload on both
+requests.
+
+§7.1's rule — that HTTP 200 and a top-level `status: REQUEST_SUCCEEDED` are necessary
+but not sufficient signals of success — is not established by this run. It is standing
+spec policy (§7.1), resting on prior external evidence of the API's error semantics
+rather than on anything observed here. The discipline is adopted here by design, not
+because this probe caught the API lying, and it still governs Stage 2's implementation.
+This run's `message[]` happened to be empty on both requests — the commonly-cited v1
+registration nag did not fire this time — so the "not sufficient" half is not
+re-demonstrated here: the run is equally consistent with HTTP-level signals having
+been sufficient on their own. That is a gap in this run's evidence, not in the rule
+(see the table row above); the rule is carried forward unverified-by-probe, not
+unsupported. Key registration (annual expiry, §7.1 alert
+requirement) is a Stage-2 setup item; the key itself is already provisioned and working
+as of this probe.
 
 ## 3. HTML posture — §20 issue 1 (Task 4)
 
