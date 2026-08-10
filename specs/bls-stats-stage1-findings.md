@@ -89,7 +89,32 @@ implies) one.
 What settles it: structural success checking demonstrated live — HTTP 200 and
 `REQUEST_SUCCEEDED` are not success signals.
 
-*(recorded by Task 3)*
+**Probe:** `probes/transport_api.py`, run 2026-08-10
+(`probes/results/transport_api-2026-08-10.jsonl`).
+
+| Check | Result |
+|---|---|
+| v1 unregistered GET, HTTP status | 200 |
+| v1 top-level `status` field | `REQUEST_SUCCEEDED` |
+| v1 `message[]` | `[]` (empty — no registration nag on this run) |
+| v1 per-series datapoints | 31 (1 series, `CES0000000001`, HTTP/2, `content-encoding: gzip`) |
+| v2 registered POST | HTTP 200; `status` `REQUEST_SUCCEEDED`; `message[]` `[]`; 1 series, 24 datapoints (HTTP/2, `content-encoding: gzip`) |
+
+**Verdict:** the `api` profile reaches api.bls.gov; success is only determinable by
+payload inspection (`message[]` + per-series data), confirming §7.1's rule in the sense
+that HTTP 200 and a top-level `status: REQUEST_SUCCEEDED` are necessary but not
+sufficient — the probe's `payload_verdict` explicitly parses `Results.series` and sums
+each series' `data[]` before calling anything a success, and only that check
+(`success_by_payload`) is what the script trusts. On this run both v1 and v2 also passed
+that structural check (31 and 24 datapoints respectively), and `message[]` happened to
+be empty on both — the commonly-cited v1 registration nag did not fire this time, so
+this run does not exhibit a non-empty-`message`-despite-success case, but it does not
+need to: the rule under test is that the payload must be inspected regardless of what
+`message[]` contains, not that `message[]` is always non-empty. Registered-key path
+tested: a key is on hand (`.project.env`, git-ignored) and was exercised live via one v2
+POST, spending one query against its daily quota. Key registration (annual expiry,
+§7.1 alert requirement) is a Stage-2 setup item; the key itself is already provisioned
+and working as of this probe.
 
 ## 3. HTML posture — §20 issue 1 (Task 4)
 
