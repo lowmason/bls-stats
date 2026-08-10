@@ -1,5 +1,8 @@
 # bls-stats
 
+> For agentic workers: REQUIRED NEXT SKILL: derive-roadmap — do not plan
+> this spec directly and do not split it into per-subsystem plans.
+
 **Status:** design proposal. 
 
 **Date:** 2026-08-04 · **Revised:** 2026-08-10
@@ -12,6 +15,21 @@ with concurrency control moot, removes the case for a transactional table format
 **plain partitioned Parquet with an application-level commit** (§9.1). That in turn moves P2's
 durability boundary onto the blob + `fetch_log` pair and replaces §17.3's two leases with a
 capture/store **plane split**. The object-store adapter is **purpose-built in-repo** (§16.1).
+
+**Revision 2026-08-10 (b) — external-review synthesis.** A state-of-the-art design review
+(`specs/bls-stats-spec-review.md`) was triaged and synthesized into this document. Substantive
+additions: manifest statistics (§9.1, R4), manifest attestation (§9.1, R5), full-header capture
+(§7.3, R10), archive fixity and replication requirements (§17.4, R6/R7), invariants 26b and
+N10–N12 (§14.2), and a prior-art record (§2, R1). The §9.1 storage argument is re-stated on honest
+grounds (R2). §20 issues 2, 4, 5, 12, 13, 15 updated; one new (open) on §18.2's golden-test dates
+(R16). Full disposition record: §21.
+
+**Design provenance.** Synthesized from this document's pre-review text (commit `c93f5e7`,
+2026-08-10) and the external critique `specs/bls-stats-spec-review.md` (commit `a8e5dd6`), per the
+describe-critique-methodology round-trip. Locators of the form **(R-n)** cite row *n* of §21's
+synthesis record, which anchors each point to the review's own sections. Citations of the form
+`review §…` continue to name the companion domain-evidence document, as before — the two are
+distinct sources.
 
 ---
 
@@ -49,7 +67,8 @@ The split that follows from this:
 §4–§6 are the control plane (slots, program registry, the three-signal reconciliation). §7–§10 are
 the data plane (capture, interpretation, storage, as-of semantics). §11–§14 are backfill, the errata
 and notices channels, disruption handling, and validation. §15–§20 are the buildable surface: CLI,
-packaging, deployment, testing, sequencing.
+packaging, deployment, testing, sequencing. §21 is the external-review synthesis record, where
+every (R-n) locator resolves.
 
 ---
 
@@ -70,6 +89,14 @@ Correctness means *historical* correctness: an as-of query at `D` must never ret
 footnotes, or series that were not publicly retrievable at `D`. The dominant failure mode of a
 naive store is not an error — it is silently returning today's revised values under yesterday's
 date, which corrupts every downstream backtest without ever raising.
+
+The premise is no longer hypothetical (R17). Within a year of this document's drafting: the CES
+preliminary benchmark of 2025-09-09 announced a −911,000 revision (USDL-25-1352), and the
+2026-02-11 final put the March-2025 NSA miss at −862,000, with 2025 job growth revised from
++584,000 to +181,000 SA (USDL-26-0169); the BLS commissioner was dismissed hours after the
+2025-08-01 jobs report; and the 43-day appropriations lapse cancelled the October 2025 CPI release
+outright — the October unemployment rate can never be computed (Reuters, 2025-11-21). Vintages are
+now politically contested objects, and a window not captured is gone.
 
 ### 1.2 In scope
 
@@ -236,6 +263,26 @@ matrix tables — must be degradable: if HTML fetching fails entirely, ingestion
 artifact polling alone, losing scheduled times, errata pre-arming, and proactive reschedule
 detection, but not losing data. Only EP is genuinely HTML-native, and it is the lowest-frequency
 program in scope.
+
+### Prior art — convergence, recorded (R1)
+
+The external review's central finding is that this design *converges* with established systems far
+more than it deviates. Worth recording, because each analogue is both a citation and a place to
+look when its mechanism here needs hardening:
+
+| Mechanism here | Established analogue |
+|---|---|
+| Plane split: lock-free capture + one leased writer (§17.3) | Datomic's transactor — immutable data, a single writing process (Hickey 2012) |
+| Manifest-then-atomic-pointer commit (§9.1) | Iceberg's atomic metadata swap; crash orphans are invisible, not corrupt |
+| `_current` generation pointer (§17.4) | Iceberg/Delta root-pointer versioning — a catalog pointer |
+| Change log + as-of query (§9.3, §10.1) | ALFRED's `realtime_start`/`realtime_end`; the Croushore–Stark real-time datasets |
+| `wire_sha256` / `content_sha256` + `restamp_only` (§6.1, §7.3) | WARC block- vs payload-digest and `revisit` records (ISO 28500) |
+| `current_state` projection (§8.3) | CQRS read model folded from an event log |
+| The clairvoyance ban (§1.1, N1–N3) | Feature-store point-in-time correctness |
+
+One deviation is deliberate, and the review endorsed it: ALFRED records a vintage only on revision,
+while `restamp_only` sides with WARC's `revisit` in recording *proof of continuity* — that BLS
+republished a file unchanged is a real fact, and only it proves a value was still current.
 
 ---
 
@@ -499,7 +546,7 @@ This is the operative table. Every entry is "given a release whose newest refere
 | Program | Release kind | Predicate on `t_max` | Reference periods touched (backward from `t_max`) |
 |---|---|---|---|
 | **CES-N** | routine | *always* | `t_max` = 1st prelim · `t_max−1` = 2nd prelim · `t_max−2` = 3rd/final |
-| **CES-N** | benchmark | month = M01 of `Y` | NSA `Apr(Y−2) … Dec(Y−1)` (21 mo) · SA `Jan(Y−5) … Dec(Y−1)` (60 mo) · **lower bound** |
+| **CES-N** | benchmark | month = M01 of `Y` | NSA `Apr(Y−2) … Dec(Y−1)` (21 mo) · SA `Jan(Y−5) … Dec(Y−1)` (60 mo) · **lower bound** · 21-mo span confirmed for national CES by the CES FAQ (R14) |
 | **CES-N** | prelim benchmark | separate notice, Aug/Sep | analytical announcement; **may not touch the flat file at all** (§4.1) |
 | **SAE** | routine | *always* | `t_max` = prelim · `t_max−1` = final. **N=2, not 3 — do not port CES's rule** |
 | **SAE** | benchmark | month = M01 of `Y` | NSA `Apr(Y−2) … Dec(Y−1)` (QCEW replacement runs to `Sep(Y−1)`, then re-estimation) · SA `Jan(Y−5) … Dec(Y−1)` · **lower bound; publication month drifts Feb–Apr — do not predicate on it** |
@@ -576,7 +623,8 @@ incrementally) is what keeps the disruption cases from being afterthoughts.
 
 Two rows deserve emphasis. Row 3 (`unannounced publication`) is why **artifact polling never stops
 during a shutdown** (§13.2). Row 7 (`silent mutation`) is the QCEW 2025-12-19 → 2026-01-07 case,
-which is the system's canonical regression test (§18.2).
+which is the system's canonical regression test (§18.2) — those dates carry an (open) verification
+marker there (R16), with the verified 2019-09-09 QCEW reload as the documented fallback instance.
 
 ### 6.1 Change detection
 
@@ -668,7 +716,7 @@ profiles:
 
 | Profile | Hosts | Notes |
 |---|---|---|
-| `flatfile` | `download.bls.gov`, `data.bls.gov` | Primary ingest. HTTP/2, connection reuse, descriptive contact User-Agent, conservative concurrency (≤4). Streaming downloads. |
+| `flatfile` | `download.bls.gov`, `data.bls.gov` | Primary ingest. HTTP/2, connection reuse, descriptive contact User-Agent — **mandatory from the first request, not a courtesy: the flat-file host 403s bare user agents, and BLS policy permits real-time blocking of non-compliant robots (R12)**. Conservative concurrency (≤4). Streaming downloads. |
 | `api` | `api.bls.gov` | Spot checks only. **Never trust HTTP 200 or `REQUEST_SUCCEEDED`** — inspect the `message` array and per-series data presence. Key expires annually; alert on auth messages. |
 | `html` | `www.bls.gov` | Known to 403 ordinary fetchers. Full browser-shaped headers, HTTP/2, low rate. **Pluggable backend** (§7.2). |
 
@@ -732,13 +780,19 @@ Sidecar metadata goes to `fetch_log`, not to object tags:
 fetch_log (append-only JSONL, partitioned dt=YYYY-MM-DD)
   request_id, url, method, profile, requested_at, status_code,
   http_last_modified, etag, content_length, content_encoding,
+  request_headers, response_headers,   # complete header blocks, verbatim (R10)
   wire_sha256, content_sha256 (null on HEAD), blob_key (null on HEAD), byte_size,
   outcome enum: unchanged | restamp_only | new_bytes | error | blocked
   error_class, duration_ms, slot_id
 ```
 
 This log is the forensic record. When a vintage looks wrong six months later, the question "what
-exactly did we ask for and what exactly came back" must be answerable.
+exactly did we ask for and what exactly came back" must be answerable — and R10 makes the answer
+complete: both header blocks are stored verbatim rather than as a curated field subset, which the
+external review's WARC comparison identified as the one forensic loss of the blob + JSONL split.
+(Adopting WARC itself as the capture container was considered and **rejected** — R9, §21: its
+replay tooling serves a §1.3 non-goal, content-addressed blob keys are load-bearing for P2's
+lock-free capture idempotency, and with full headers kept, a later lossless WARC wrap stays open.)
 
 It is also, per P2, **half the durability boundary** — which fixes two properties that would
 otherwise be implementation detail:
@@ -999,13 +1053,17 @@ was *present and unchanged* in a release, which the change log alone cannot.
 
 **Plain Hive-partitioned Parquet for every ledger and store table. No transactional table format.**
 
-This is a consequence of §1.4, not a preference. A table format's central feature is safe concurrent
-commits, and it implements that with a compare-and-swap on the log — conditional PUT. The deployment
-endpoint does not offer one. The remaining options are an external lock service (an AWS-only service,
-out of scope) or declaring a single writer — and once there is a single writer, **the concurrency
-control is doing nothing**, while its costs remain: a commit log to maintain, a version history to
-vacuum, and a safety property that now rests entirely on our lease being correct rather than on the
-format. Paying for a concurrency engine that is switched off is the wrong trade.
+**Chosen on honest grounds, not forced (R2).** The missing conditional PUT forces *single-writer
+mode* (§1.4); the external review corrected this section's earlier claim that it also forces plain
+Parquet. Transactional formats can commit without object-store compare-and-swap — Iceberg through a
+catalog transaction, DuckLake through a SQL metadata database, delta-rs in explicit single-writer
+mode. Under §1.4 the catalog variants remain unavailable for a *structural* reason — a catalog is a
+second durable system, and the object store is the only durable storage this deployment has — but a
+single-writer table format is genuinely possible. Plain Parquet is therefore a **choice**, made on
+one ground: zero external dependencies in the custody path. Once a single writer is declared, the
+format's central feature — concurrency control — is inert, while its costs remain: a commit log to
+maintain, a version history to vacuum, and a safety property resting on our lease either way. What
+is bought is operational simplicity; what is paid is listed below, honestly.
 
 What a table format would still have given, and where each is answered instead:
 
@@ -1014,6 +1072,8 @@ What a table format would still have given, and where each is answered instead:
 | Atomic multi-file commit | **The manifest protocol below** — one atomic single-object PUT, which §1.4 guarantees |
 | Idempotent retry | **Deterministic file naming** — a retry rewrites the identical key with identical bytes. Strictly simpler than a transaction token |
 | Schema enforcement on write | An explicit declared schema per table, asserted at the commit boundary by the validation engine (§14) — which already runs there |
+| File-level column statistics / scan pruning | **Manifest statistics (R4), below** — recorded at commit, used by the as-of query and the differ |
+| Snapshot isolation for naive external readers | **Partly conceded.** The supported consumer interface is the CLI (§1.3); a direct-Parquet consumer must resolve `_current` and the §9.1 semi-join, which a table format would have handled for any reader |
 | Compaction | §17.4's generation pointer, below |
 | Time travel over the store itself | **Genuinely lost.** Accepted: P1 makes the byte archive the audit surface, and §17.4 already argued store-version retention buys nothing because replay selects on `knowledge_time`, a data predicate |
 
@@ -1048,6 +1108,45 @@ one table over from where §9.1 was aimed.
 still a true diagnostic — often the very reason it aborted (§14.1's `[ASSERT]` path writes a finding
 *and* blocks the commit). Gating findings on the manifest would hide exactly the records an operator
 needs. Findings therefore reference `release_event_id` for correlation but are visible on write.
+
+#### Manifest statistics (R4)
+
+The `release_event` manifest additionally records, **per object it commits**, the row count and the
+min/max of `knowledge_time` and of the unit-key columns — the hand-rolled equivalent of a table
+format's file statistics, which is the one concrete loss the external review identified in
+rejecting Iceberg. Two consumers: the as-of query (§10.1) drops objects whose `knowledge_time`
+minimum exceeds `D` without opening them, and the differ (§8.3) skips objects outside the
+artifact's key range. Compaction preserves the mechanism: `gen=<n+1>/` carries a `_stats.json`
+recording the same statistics for the compacted objects, written **before** the `_current` swap
+(§17.4), so a reader always finds statistics beside whichever generation the pointer names.
+
+#### Manifest attestation (R5)
+
+The store's central claim — *these bytes were observed at this instant* — rests, as specified so
+far, entirely on self-reported logs; an operator who back-dated `knowledge_time` would leave no
+inconsistency for `verify` to find. The external review ranked third-party attestation its
+highest-EV improvement, and it has the same at-creation-or-never shape as §7.3's object-lock rule:
+a proof over today's manifest can only be made today.
+
+The lightweight form is adopted (adjudicated — §21): after the `release_event` PUT, the writer
+submits the manifest object's SHA-256 to a trusted timestamping service — OpenTimestamps, or an
+RFC 3161 TSA — and stores the returned proof under the **archive bucket**
+(`attest/<release_event_id>`, §9.2), because a proof is the one artifact class besides the archive
+itself that cannot be regenerated after the fact.
+
+Three rules keep it lightweight:
+
+- **Attestation never blocks a commit.** The stamp is fired after the commit point and retried by
+  subsequent `tick --write` runs; an unreachable service degrades to a backlog, never an abort.
+- **The outage fallback is a batch root.** Pending manifest hashes fold into a Merkle root stamped
+  as one proof when the service returns; per-event proofs derive from the batch.
+- **Backlog is monitored, not silent.** Invariant N10 flags any committed event lacking a proof
+  beyond tolerance; `doctor` reports attestation state; `verify attest` (§15) re-verifies stored
+  proofs against the archived manifests.
+
+Loss of a proof degrades *evidence*, never *data*: the store remains fully rebuildable (P1) — what
+is lost is only third-party demonstrability of *when*. This is why proofs live under the immutable
+bucket's protections but do not join `raw/` + `log/fetch/` as rebuild inputs; §10.4 is unchanged.
 
 #### Mutable tables
 
@@ -1113,6 +1212,7 @@ see §17.4.
 ```
 s3://<raw-bucket>/                              # immutable; no delete permission (§17.4)
   raw/blob/sha256=<hh>/<hh>/<sha256>            # content-addressed, never expires
+  attest/<release_event_id>                     # timestamp proofs (§9.1, R5) — evidence-class, not a rebuild input
 
 s3://<bucket>/                                  # versioned, mutable
   log/fetch/dt=<YYYY-MM-DD>/<run_id>.jsonl      # every HTTP interaction; one object per run (§7.3)
@@ -1269,6 +1369,10 @@ interrupted commit — the one way this store can return values that were never 
 in the single `as_of` implementation that every consumer goes through, never re-derived by callers.
 `release_event` is small (one row per release ever observed) and the join key is already a column,
 so the cost is a broadcast semi-join, not a shuffle.
+
+The manifest statistics (§9.1, R4) act before any of this: objects whose recorded `knowledge_time`
+minimum exceeds `D`, or whose unit-key range misses the query's, are dropped unopened — the pruning
+a table format would have supplied from file metadata.
 
 **`strict` is a constraint on `D`, not a filter on rows.** This distinction is the difference
 between a working store and a silently empty one, and it is worth stating why. §8.3 makes
@@ -1479,7 +1583,11 @@ clean reconciliation.
 ALFRED (St. Louis Fed) and the Philadelphia Fed Real-Time Data Set carry independent vintage history
 for headline CES and CPS series, with release dates back to 1966. Ingest with
 `provenance = external`, never into `strict` queries, and use only to sanity-check the seed and
-knowability layers. Both have documented limitations (ALFRED omits unchanged republications;
+knowability layers. Formalized as **invariant 26b** (R11): at backfill completion and at each
+benchmark job, divergence between the store's `seed`/`reconstructed` layers and the external
+record — a differing vintage value, or a first-publication date off by more than tolerance —
+raises a FLAG finding with **both-may-be-wrong semantics**: ALFRED itself reconstructs dates where
+sources kept none, so a divergence is a lead to investigate, never an auto-correction. Both have documented limitations (ALFRED omits unchanged republications;
 Philadelphia's month-end cadence misses intramonth corrections) that make them cross-checks rather
 than sources.
 
@@ -1706,8 +1814,13 @@ So the precision path gets a defense that does not depend on the notices channel
 mass-change circuit breaker** at commit. A release classified `routine` that revises more than a
 per-program threshold of that program's live series **aborts the commit** and opens a triage item.
 P2 makes this nearly free — the bytes are already archived, so a false positive costs one human look
-while a false negative is unrecoverable. The threshold is a distribution question to settle against
-the first year of observed footprints, not a number to fix in this document.
+while a false negative is unrecoverable. The threshold now has an evidence-based
+anchor (R15): BLS's own QCEW revision statistics — establishment counts rarely move more than ±1%,
+employment and wage levels more than ±0.1%, initial to final (bls.gov/cew/revisions) — so QCEW's
+breaker trips when a `routine` release moves national or state aggregates beyond that published
+envelope. The same method sets the other programs' initial values — anchor to published revision
+statistics where the program has them, start conservative where it does not — and the first year
+of observed footprints then tunes them (§20 issue 12).
 
 With that breaker in place: the rest is noisier, none of it is wrong, and no data is lost. That is
 the P9 contract.
@@ -1802,7 +1915,10 @@ alerting to one incident-level notification.
    through September 2025 while explicitly forgoing the news release (review §12.5). A
    news-release-driven detector would have missed a real data update. Any artifact change during an
    incident is captured, committed, and flagged `unannounced` — and it is high-value signal, not
-   noise.
+   noise. The 43-day lapse of 2025-10-01 → 11-12 then showed the stakes in the other direction
+   (R17): the October CPI release was cancelled outright and the October household-survey
+   unemployment rate is permanently uncomputable — a shutdown does not merely delay data; it can
+   destroy it.
 2. **`t_max` on resumption is read, never assumed.** BLS may skip a reference period, combine two,
    or publish out of order. This is the whole reason §0's backward-looking design exists.
 3. **Nothing is auto-cancelled.** A slot that will never be filled is closed by a human, with a
@@ -1905,6 +2021,7 @@ All 27 invariants from review §16, plus N1–N8 added by this document, with th
 | 24c | An NCS notice is never applied to ECEC on ECI evidence alone (review §12.7) | ASSERT | notice routing |
 | 25 | Errata rate budget (~12/yr, ~⅓ database) | FLAG | monitor |
 | 26 | Cross-validate against BLS's own revision diffs | FLAG | benchmark job |
+| **26b** | **Cross-validate `seed`/`reconstructed` layers against external vintage databases (ALFRED / Phil-Fed); divergence is a lead — both may be wrong (§11.5, R11)** | FLAG | backfill + benchmark job |
 | 27 | Scheduled times from the calendar, never a constant | ASSERT | registry lint |
 | **N1** | **Seed/reconstructed rows never take `knowledge_time` from `knowability`** | **ASSERT** | **commit (§11.2)** |
 | **N2** | `knowledge_time ≤ first_observed_at + poll_tolerance`, except the flagged `early_artifact` branch | ASSERT | classify (§8.2) |
@@ -1915,6 +2032,9 @@ All 27 invariants from review §16, plus N1–N8 added by this document, with th
 | **N7** | **No store write occurs without the writer lease held and unexpired** (§17.3). With no compare-and-swap in the endpoint, an unguarded write is silently corrupting rather than merely racy, so this is checked in the write helper itself rather than trusted to deployment discipline | ASSERT | every `store/` and `ledger/` write |
 | **N9** | **No `observation` row is readable without a committed `release_event`** (§9.1). The as-of query's semi-join is the enforcement; a property test asserts an interrupted commit's rows are invisible | ASSERT | query layer + property test |
 | **N8** | Ledger materialization is idempotent: re-running it over the same `fetch_log` range produces zero new rows (§17.1) | ASSERT | `tick --write`, post-materialization |
+| **N10** | Every committed `release_event` acquires a timestamp proof within tolerance; a backlog beyond it is a finding (§9.1, R5) | FLAG | daily monitor |
+| **N11** | Archive fixity: a sampled re-hash of `raw/` blobs matches their content-addressed keys (§17.4, R6) | FLAG | fixity job |
+| **N12** | An independent second copy of `raw/` + `log/fetch/` exists; any single-copy period longer than one release cycle is a standing finding (§17.4, R7) | FLAG | doctor + daily monitor |
 
 **Operator override.** Because an `[ASSERT]` blocks a commit while the bytes are already archived
 (P2), there must be a documented path from a blocked commit to a stored observation — otherwise a
@@ -1978,6 +2098,8 @@ bls-stats findings ls [--severity assert] [--state open]
 bls-stats verify replay [--sample 50] [--program P]
 bls-stats verify benchmark-diff --program sae --benchmark 2025
 bls-stats verify coverage
+bls-stats verify attest [--since D]           # re-verify timestamp proofs against archived manifests (R5)
+bls-stats verify fixity [--sample N|--full]   # re-hash raw/ blobs against their keys (R6); --full is resumable
 
 # query
 bls-stats query --series CEU0000000001 --as-of 2026-03-01 [--strict/--no-strict]
@@ -2037,7 +2159,7 @@ src/bls_stats/
 | Dependency | Role |
 |---|---|
 | `httpx[http2]` | All HTTP. HTTP/2 matters for the WAF-shaped requests. |
-| `polars` | All tabular data **and the store itself** — `scan_parquet` / `sink_parquet` for streaming, Hive partitioning for pruning (§9.1). |
+| `polars` | All tabular data **and the store itself** — `scan_parquet` / `sink_parquet` for streaming, Hive partitioning for pruning (§9.1). **Pinned; bumps are deliberate** (R18): streaming-engine memory regressions between releases are documented, so a version bump must pass §18.1's memory-envelope gate before adoption. |
 | `typer` | CLI. |
 | `pydantic` + `pydantic-settings` | Config and schema validation at boundaries. |
 | `tenacity` | Retry with jitter. |
@@ -2099,10 +2221,10 @@ store writer. Everything above the line runs freely and concurrently; everything
 |---|---|:-:|---|
 | `tick --fast` | every 2 min | **no** | HEAD-poll slots in a watch window; on a change, GET → blob → `fetch_log`. No-op when nothing is due. |
 | `tick --sweep` | hourly | **no** | Baseline HEAD sweep over every in-scope artifact (§6.2), plus the *fetch* half of `calendar sync`, `feed poll`, `errata sync`, `notices sync` — each retrieved surface archived as a blob with a `fetch_log` record, exactly like a data artifact |
-| `tick --write` | every 5 min | **yes** | The single writer. In order: materialize `file_vintage` + slot transitions from `fetch_log`; ingest the fetched calendar / feed / errata / notice blobs into the ledger; parse pending captures; validate; commit |
+| `tick --write` | every 5 min | **yes** | The single writer. In order: materialize `file_vintage` + slot transitions from `fetch_log`; ingest the fetched calendar / feed / errata / notice blobs into the ledger; parse pending captures; validate; commit; fire or retry manifest attestation (§9.1, R5) |
 | `tick --daily` | daily | **yes** | Triage report, coverage/staleness monitor, errata rate monitor, notifications |
 | `compact` | daily | **yes** | Generation-swap compaction (§17.4) on hot `observation` partitions and on `finding` |
-| `verify` | weekly | no (read-only) | Replay verification on a sample; `benchmark-diff` when a benchmark landed |
+| `verify` | weekly | no (read-only) | Replay verification on a sample; `benchmark-diff` when a benchmark landed; fixity sample over `raw/` (R6) |
 
 **The three `yes` rows serialize behind the one lease (§17.3)** — `tick --write` skips its run if the
 lease is held, and `--daily` / `compact` are scheduled into a quiet window. They may make each other
@@ -2194,12 +2316,19 @@ here, because the development and deployment endpoints differ in both directions
 | **Immutability on the archive bucket** — object-lock retention, or equivalent | P1: a captured vintage is unrecoverable if lost | ⚠ Degrade to the delete-deny policy alone and record the gap. Note that where object lock exists it is commonly settable **only at bucket creation** and needs a *duration*, not just a mode — so it must be configured before the first capture or not at all |
 | **Delete denied to the runtime credential on the archive bucket** | There is no operational reason to delete an archived vintage, and every reason to be unable to | Hard requirement. Do not run without it |
 | **`raw/` never expires** | Same | Hard requirement |
+| **An independent second copy of `raw/` + `log/fetch/`** (R7; adjudicated — §21) | Versioning and delete-deny protect against *logical* loss, not media or provider failure; P1 makes the archive irreplaceable, and 2025 proved a missed window permanent | Run, but `doctor` reports replication state and any single-copy period longer than one release cycle is a standing finding (N12). The mechanism — provider replication, a second endpoint, a pull job — is the deployment's choice; the requirement is that the copy exist and be independent |
 
 **Two buckets** — `s3://<raw-bucket>/raw/` and `s3://<bucket>/{log,ledger,store,ops}/` — because it
 makes delete-deny and retention whole-bucket statements rather than prefix conditions, and keeps
 compaction's rewrites unambiguously clear of immutable objects. Per-object retention would make a
 single shared bucket workable; the separation is chosen because it is cheap and the blast radius of
 a policy mistake on `raw/` is P1's unrecoverable failure.
+
+**Fixity is checked, not assumed (R6).** Content-addressing makes integrity verification trivial —
+a re-hashed blob must equal its key — and the design now requires that it be *done*: `verify
+fixity` (§15) re-hashes a weekly sample and completes a full, resumable pass quarterly; any
+mismatch is a FLAG finding (N11), treated as a candidate media failure and cross-checked against
+the replica above before any conclusion is drawn.
 
 **No lifecycle tiering is assumed.** The former "`log/fetch/` transitions to infrequent access at 90
 days" rule is **dropped, not translated** — storage classes are an AWS-only feature (§1.4). The
@@ -2263,11 +2392,12 @@ further coordination is needed.
 | Transport | `respx`-mocked httpx: 403 handling, `Last-Modified` semantics, restamp-only, retry/backoff. |
 | Delta rules | Table-driven tests over every program × release kind, asserting exact footprints for dated instances from the review. |
 | Duality | `hypothesis`: `t ∈ footprint(r) ⟺ r ∈ prints_of(t)` over random programs and periods. |
-| As-of | `hypothesis`: for random `D` and each key, the returned row **equals the row with the maximum `knowledge_time ≤ D`**, computed independently of the query under test. The weaker "no row has `knowledge_time > D`" is satisfied by returning nothing, and so cannot detect the §18.2 QCEW regression it is paired with. |
+| As-of | `hypothesis`: for random `D` and each key, the returned row **equals the row with the maximum `knowledge_time ≤ D`**, computed independently of the query under test. The weaker "no row has `knowledge_time > D`" is satisfied by returning nothing, and so cannot detect the §18.2 QCEW regression it is paired with. This is the feature-store point-in-time-join correctness property (R19). |
 | Strict semantics | `as_of(T₀ + ε, program, strict=True)` returns exactly the seed release's row count — the check that catches §10.1's sparse-log trap. |
 | Differ | Synthetic vintage pairs covering every `change_kind`, including `deleted`, `precision_only`, and suppression flips. |
 | Store | Round-trip commit → replay → compare, on a temporary store root. Plus **the torn-commit test**: write a release's `observation` *and* `series_catalog_vintage` objects, omit the `release_event` PUT, assert both are invisible — then PUT the event and assert both appear. Catalog rows are included deliberately: gating them is what stops an aborted commit from being read as a series addition (§9.1). This is the one test that proves the manifest protocol, and it has no equivalent in a table-format design because the format would have provided it. |
 | Compaction | Generation swap under simulated crashes: kill before and after the `_current` PUT, assert the reader sees exactly one generation and identical row counts either way. Plus the empty case — **a partition with no `_current` reads as empty, never as an error** (§17.4), which is the state every test fixture starts in. |
+| Memory envelope | A QCEW-scale synthetic fixture runs the differ and the as-of query under a hard peak-RSS budget and fails on regression (R18) — the gate that catches a silent fallback from the streaming engine to in-memory, which no unit test sees, and the gate a `polars` version bump must pass (§16). |
 | Rebuild | §10.4's chain end to end on a small fixture: drop `ledger/` and `store/` entirely, rebuild from `raw/` + `log/fetch/`, and assert byte-identical `file_vintage_id`s and an identical `as_of` result at several `D`. This is the least-exercised path in the design and the one that runs during a disaster. |
 | `objstore` | Local-filesystem backend for logic; a `--real-store` marker for a live round-trip asserting `storage_options()` produces keys the reader/writer actually honour, that `list()` paginates past one page, and that a failed write raises (§16.1). A mocked object store cannot catch a wrong option key — it accepts whatever it is handed. |
 | Ledger materialization | `fetch_log` JSONL → `file_vintage` + slot transitions is a pure function of the log; test it by generating a log, materializing twice, and asserting the second run is a no-op. Idempotency here is what makes the §17.3 plane split safe. |
@@ -2282,6 +2412,14 @@ Three cases from the review, encoded as permanent tests:
    (the second `release_kind = correction`), and that `as_of("2025-12-20")` returns the **defective**
    values. This is the canonical worked example for the entire design; if it ever breaks, the store
    is no longer point-in-time correct.
+   ⚠ **(open — resolved by verification, not argument):** the 2025-12-19 / 2026-01-07 dates come
+   from the domain review and did not verify against primary sources in the external review (R16);
+   its cadence objection does not refute a *correction* — corrections are off-cadence by nature —
+   but unverified is unverified. Discharge: confirm against `bls.gov/cew/notices` (or its Wayback
+   capture) when this fixture is built at M2. The **verified** instance of the same shape — the
+   2019-09-09 reload replacing defective 2019-09-04 QCEW files (bls.gov/cew/notices/2019) — is the
+   fallback fixture; the test's substance (two `file_vintage` rows, second event `correction`,
+   as-of returning the defective values) is date-independent.
 2. **CPS March 2026.** Population controls introduced with February estimates; January 2026 revised;
    news release not reissued. The test asserts the revision is captured (P3), invariant 14 flags
    without blocking, and the release is classified `population_control` via the three-signal
@@ -2327,20 +2465,20 @@ Stated honestly rather than resolved by assertion.
 | # | Issue | Position | What would settle it |
 |---|---|---|---|
 | 1 | **`www.bls.gov` 403.** Whether browser-shaped `httpx` suffices, or a headless backend is mandatory. | Design assumes it may be mandatory (§7.2) and degrades cleanly. | A live probe across all three transport profiles, run at M0. Review §19 flags this as an unresolved queue item — and it determines the whole HTML ingest posture. |
-| 2 | **`download.bls.gov` fetch behavior.** The 403 was observed on `www`; the flat-file host and API were not tested. | Assumed unrestricted. | Same probe. If the flat-file host is also restricted, this is the single largest risk to the design, and M0 must resolve it before anything else is built. |
-| 3 | **Plain Parquet vs. a transactional table format (Delta / Iceberg).** | Parquet, per §9.1: with no conditional PUT the format's concurrency control is inert, while its commit log, version retention, and compaction machinery still cost. The manifest protocol supplies the one property actually needed. | Adopt a format if a downstream consumer mandates one, if the endpoint gains conditional PUT *and* a second writer becomes necessary, or if the §17.4 generation swap proves fragile in practice. **Reversible** — the change log is derived (P1), so adoption is a rebuild, not a migration. |
-| 4 | **QCEW artifact choice**: LABSTAT `en` prefix vs. the quarterly singlefile CSVs (and the by-size ZIP). | Registry-level decision per artifact; likely singlefile CSVs for tractable per-quarter diffing. **Must be settled before M2 hardens the differ**, because it determines whether `authoritative_scope` is per-quarter or per-history (§8.3). | Measuring actual sizes and diff cost against the 8 GB envelope. |
-| 5 | **CES national 21-month NSA span** is confirmed verbatim for SAE only; for national CES it is derived, not quoted (review §2.5.4). | Encoded as a `[FLAG]` lower bound, so a wrong figure produces a finding, not a corruption. | Locating an explicit national-CES statement. |
+| 2 | **`download.bls.gov` fetch behavior.** The 403 was observed on `www`; the flat-file host and API were not tested. | **Partially settled (R12):** the flat-file host is *not* unrestricted — it 403s bare/default user agents, and BLS policy permits real-time blocking of non-compliant robots. Working assumption: accessible with a compliant, contactable User-Agent at polite rates; §7.1 makes that mandatory from the first request. | Same probe, unchanged and still first: confirm the compliant profile passes and lock the ingest channel before anything else is built. |
+| 3 | **Plain Parquet vs. a transactional table format (Delta / Iceberg).** | Parquet, per §9.1 — **re-argued on honest grounds (R2):** not forced by the endpoint (single-writer formats exist without compare-and-swap; catalog-based ones would need a second durable system §1.4 rules out) but *chosen* for zero dependencies in the custody path, with the conceded losses answered in §9.1 — pruning by R4's manifest statistics, naive-reader snapshot isolation by the CLI as the supported interface. | Adopt a format if a downstream consumer mandates one, if the endpoint gains conditional PUT *and* a second writer becomes necessary, or if the §17.4 generation swap proves fragile in practice. **Reversible** — the change log is derived (P1), so adoption is a rebuild, not a migration. |
+| 4 | **QCEW artifact choice**: LABSTAT `en` prefix vs. the quarterly singlefile CSVs (and the by-size ZIP). | **Direction settled (R13): the quarterly singlefile CSVs**, corroborated as the tractable per-quarter diff artifact; fixes `authoritative_scope` as per-quarter (§8.3), settled before M2 hardens the differ. | **(open — resolved by measurement, not argument):** actual byte sizes and diff cost against the 8 GB envelope, at M0/M2 — the review's size figures are third-party. |
+| 5 | **CES national 21-month NSA span** is confirmed verbatim for SAE only; for national CES it is derived, not quoted (review §2.5.4). | **Closed (R14):** the CES FAQ and benchmark article state it explicitly for national CES — the final benchmark revises 21 months, anchored to March of the prior year, published with the January preliminaries. Encoding unchanged: still a `[FLAG]` lower bound per P5. | Settled — cite `bls.gov/web/empsit/cesfaq.htm` and `cesbmart.htm` in the registry entry. |
 | 6 | **OEWS publication window** (Mar–May drift) and correction history — the one unresolved item from the review's verification pass. | Treated as calendar-driven with a wide watch window; no fixed date encoded. | Observing two or three cycles post-`T₀`. |
 | 7 | **EP `ep` flat file twice-yearly refresh** (wages in April, projections in September) is single-source. | Two distinct detectors on the same prefix, both flagged. | Observing one full year. |
 | 8 | **Notification transport.** Deliberately unspecified. | A pluggable sink; the triage report is the real interface. | Operator preference. |
 | 9 | **Subject-area notices coverage.** Index URLs are not uniformly patterned; NCS fans out to two in-scope programs; most areas are out of scope. | Registry table enumerated by hand at M1, with ambiguous routes attached to all candidate programs rather than dropped (§12.5). | Manually enumerating the nine in-scope subject areas and confirming each index URL and its historical depth. |
 | 10 | **Notice classification precision.** A misclassified `discontinuation` suppresses a real data-loss alert. | Rule-based with an explicit `unknown` bucket routed to triage; classification never guesses. | Backtesting the classifier against the historical notice corpus recovered at M5. |
 | 11 | **JOLTS-STATE routine `N` is undocumented.** Review §2.5.4 lists JOLTS state benchmarking detail as unverified. | Routine footprint = `t_max` only, `semantics = lower_bound`, FLAG on any prior-period change; invariant 11a's stage counts scoped per program so JOLTS-STATE is not swept in under JOLTS's `N=2`. | Observing one full benchmark cycle post-`T₀`. |
-| 12 | **Mass-change threshold** for the §12.9 circuit breaker. | Deliberately unset — a fixed number now would be a guess with ASSERT severity. | The distribution of observed routine footprints over the first year. |
-| 13 | **`content_sha256` normalization boundary.** Whether decode-only is enough, or whether line-ending/BOM normalization is also needed to avoid phantom vintages. | Decode-only, with `wire_sha256` preserved so any further normalization is re-derivable from the archive. | Observing whether any BLS surface produces byte-differing, semantically identical payloads. |
+| 12 | **Mass-change threshold** for the §12.9 circuit breaker. | **Anchored (R15):** QCEW's initial threshold from BLS's published revision envelope (establishments ±1%, employment/wages ±0.1%, initial→final); other programs by the same method where revision statistics exist, conservative defaults where they do not (§12.9). | The first year of observed footprints tunes per-program values — now a calibration, no longer a guess carrying ASSERT severity. |
+| 13 | **`content_sha256` normalization boundary.** Whether decode-only is enough, or whether line-ending/BOM normalization is also needed to avoid phantom vintages. | **Closed (R10):** decode-only, aligned with WARC payload-digest practice — normalization beyond transfer-decode would trade forensic fidelity for convenience. Line-ending/BOM handling belongs to the parse layer. `wire_sha256` keeps any future re-normalization derivable from the archive. | Settled against further normalization; a byte-differing, semantically identical payload, if ever observed, is handled at parse, not in the hash. |
 | 14 | **Endpoint topology.** §1.4 says compute is ephemeral containers; the development endpoint is a loopback service on a workstation. Those two are incompatible as written — a container cannot reach another host's loopback. | Endpoint is configuration (`AWS_ENDPOINT_URL`), never a constant, so the code is topology-agnostic and the development and deployment stores differ only by that variable. The spec asserts no topology. | Confirming the deployment endpoint's address and reachability from the container network. This also determines whether §17.3's lease is contended in practice or only theoretically. |
-| 15 | **Archive durability.** Retention and versioning protect against *logical* deletion; neither protects against media loss, and §17.4's archive is by P1 the one irreplaceable artifact. | Out of scope for this document, but not out of scope for the deployment. | An explicit backup or replication decision for the archive bucket, and confirmation of the endpoint's own redundancy posture. |
+| 15 | **Archive durability.** Retention and versioning protect against *logical* deletion; neither protects against media loss, and §17.4's archive is by P1 the one irreplaceable artifact. | **In scope now (R6/R7; adjudicated — §21):** §17.4 requires an independent second copy of `raw/` + `log/fetch/` — `doctor`-reported, with any single-copy period longer than one release cycle a standing finding (N12) — and a periodic fixity audit (N11). Mechanism remains the deployment's choice. | The deployment's replication decision, confirmed by `doctor`, plus the endpoint's own redundancy posture. |
 
 ### The three risks that actually matter
 
@@ -2353,3 +2491,43 @@ Stated honestly rather than resolved by assertion.
    fires false positives gets disabled, which is worse than never writing it. Defenses are the
    ASSERT/FLAG split, scoped `finding_policy` suppression, and the errata *rate budget* — expecting
    ~12/year rather than treating each one as an anomaly.
+
+---
+
+## 21. External-review synthesis record (2026-08-10)
+
+The external critique (`specs/bls-stats-spec-review.md`, commit `a8e5dd6`) came back as a
+**first-pass review — not adjudicated in the Chat session**: it records the reviewer's own
+verification caveats but no positions reached under push-back. Adjudication was therefore
+performed in-repo (describe-critique-methodology, synthesize mode, 2026-08-10); two points went to
+the project owner, and both decisions are recorded below. Locators **(R-n)** throughout this
+document cite this table; the "Review anchor" column names the section of the critique each point
+comes from.
+
+| R | Review anchor | Verdict | Disposition |
+|---|---|---|---|
+| R1 | Key Findings 1; Details (1) | accept | §2 prior-art subsection; no design change |
+| R2 | Details (2a); improvement 5 | accept | §9.1 argument re-stated as a choice with conceded costs; §20 issue 3 |
+| R3 | Improvement 4 (adopt a format); Stage 3 | **reject** | A catalog is a second durable system §1.4 rules out; delta-rs single-writer re-imports a format whose remaining value R4 captures; §20 issue 3's reversal triggers stand |
+| R4 | Improvement 4 (emulate statistics) | accept | §9.1 manifest statistics; §10.1 pruning; §17.4 compaction `_stats.json` |
+| R5 | Key Findings 3; Details (2b); improvement 1 | accept — **adjudicated: lightweight form** | §9.1 manifest attestation: async OpenTimestamps / RFC 3161, never blocking, batch-root fallback; N10; `verify attest` |
+| R6 | Improvement 2 (fixity) | accept | §17.4 fixity requirement; N11; `verify fixity` |
+| R7 | Details (2d); Stage 2 (replication) | accept — **adjudicated: stated deployment requirement** | §17.4 second-copy requirement, `doctor`-reported, one-release-cycle threshold; N12 |
+| R8 | Improvement 2 (external custodian) | **reject** | An organizational action, not spec content; revisit as an ops decision if R7's second copy lands with an external host |
+| R9 | Improvement 3 (WARC container); Stage 4 | **reject** | Replay tooling serves a §1.3 non-goal; content-addressed keys are load-bearing for P2's lock-free idempotency; R10 keeps a later WARC wrap lossless |
+| R10 | Improvement 3 (headers); Details (2c) | accept | §7.3 full header capture; §20 issue 13 closed decode-only |
+| R11 | Improvement 6 | accept | §11.5 formalized as invariant 26b |
+| R12 | Details (4), issues 1–2 | accept | §7.1 mandatory contactable UA; §20 issue 2 position corrected |
+| R13 | Details (4), issue 4 | accept | §20 issue 4: singlefile CSVs settled; sizes stay (open) by measurement |
+| R14 | Details (4), issue 5 | accept | §5.3 citation; §20 issue 5 closed; P5 lower-bound encoding unchanged |
+| R15 | Details (4), issue 12 | accept | §12.9 threshold anchored to QCEW's published revision envelope; §20 issue 12 |
+| R16 | Caveats (QCEW Dec→Jan unverified) | accept — with (open) | §18.2 golden case carries the verification marker; the 2019-09-09 reload is the verified fallback fixture |
+| R17 | Key Findings 4; Caveats (−862k NSA) | accept | §1.1 and §13.2 dated evidence; the uncorroborated −898k SA figure is never used |
+| R18 | Recommendations (polars note) | accept | §16 pin-and-gate; §18.1 memory-envelope layer |
+| R19 | Details (4), closing risk 2 | accept — no change needed | §18.1's as-of property test already asserts the point-in-time-join property; citation recorded |
+| R20 | Caveats (Akamai attribution) | accept — no change needed | The term does not appear in this document; it concerns the companion domain review |
+
+Untouched by the review's verification pass and unchanged here: §20 issues 6, 7, and 11. The
+review independently endorsed `restamp_only` (§6.1) as a deliberate, defensible deviation from
+ALFRED's revision-only vintage model — recorded in §2's prior-art note — and corroborated the
+API-quota characterization the design already treats as spot-check-only (§1.3).
