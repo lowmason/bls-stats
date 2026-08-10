@@ -480,7 +480,123 @@ must be re-checked before being hard-coded as a permanent assumption or the mome
 What settles it: "actual byte sizes … the review's size figures are third-party."
 Diff *cost* is measured at Stage 5 (roadmap).
 
-*(recorded by Task 5)*
+**Probe:** `probes/qcew_sizes.py`, run 2026-08-10
+(`probes/results/qcew_sizes-2026-08-10.jsonl`). The review's third-party size figures are
+now superseded by measurement. This is the stage's one full-file download (Global
+Constraints); eight sequential HEADs (2019–2026) preceded the single streaming GET, ≥2 s
+apart throughout, per `_lib.probe`.
+
+Per-year singlefile zip (HEAD Content-Length):
+
+| Year | Status | Compressed bytes |
+|---|---|---|
+| 2019 | 200 | 304,975,812 |
+| 2020 | 200 | 304,160,079 |
+| 2021 | 200 | 312,925,144 |
+| 2022 | 200 | 301,667,725 |
+| 2023 | 200 | 323,674,437 |
+| 2024 | 200 | 304,826,526 |
+| 2025 | 200 | 287,026,419 |
+| 2026 | 404 | — (no `content-length` on the 404 body; this is data, not a probe error) |
+
+The 2026 row records what was actually observed: a plain 404 at this URL pattern, nothing
+more. The likely explanation — 2026 has no quarterly release yet as of this run's date —
+is inference, not observation; this run did not check for a 2026 file under any other
+naming or confirm a release calendar, so a differently-named or differently-pathed 2026
+artifact existing is not ruled out by this 404 alone.
+
+2024's Content-Length here (304,826,526) matches Task 2's independent HEAD of the same
+URL in §1 above exactly — same date (2026-08-10), ~1.6 hours apart (Task 2's probe:
+21:28:26 UTC; this run's: 23:06:09 UTC, both JSONL `probed_at`). Two observations less
+than two hours apart agreeing is consistent with a stable artifact but says nothing about
+stability across dates (§18.3 point-in-time caveat still applies; a same-day repeat is not
+a cross-date check). 2025 was the newest year returning 200, so it is the year downloaded.
+
+Measured download (2025): 287,026,419 bytes on the wire; members:
+
+| Member | Compressed | Decompressed | Lines |
+|---|---|---|---|
+| `2025.q1-q4.singlefile.csv` | 287,026,235 | 2,199,079,362 | 14,635,261 |
+
+**The member name is itself a finding, not just a label.** `2025.q1-q4.singlefile.csv`
+names all four quarters of 2025 in one file — this "quarterly singlefile" is a
+per-*year* artifact bundling every quarter released so far for that year, not a
+per-quarter file. That contradicts a premise stated in specs/bls-stats-spec.md §8.3:
+*"QCEW's quarterly singlefile covers *one quarter*"* (the sentence motivating
+`authoritative_scope`'s per-quarter framing there). This run's evidence for the
+contradiction is the member's own filename plus its scale (2.2 GB decompressed, 14.6M
+lines for one year) — direct, not inferred — but this probe did not open the CSV to
+confirm its column layout (e.g. whether a `qtr` column disambiguates rows, or whether
+each release simply appends/overwrites the whole year's rows). Per this task's scope
+(sizes, not the differ's design), no fix to §8.3's `authoritative_scope` framing is
+proposed here; this is recorded as a measured fact for Stage 5 to reconcile against the
+spec text before hardening the differ.
+
+**HEAD Content-Length vs. bytes actually received — the check Task 2's `download.bls.gov`
+finding (§1) flagged as necessary.** HEAD reported `content-length: 287026419` for the
+2025 URL (JSONL, HEAD record for year 2025); the streaming GET wrote exactly
+`bytes_on_disk: 287026419` to disk (JSONL, `downloaded` record). **These agree exactly —
+no discrepancy on `data.bls.gov` for this file, on this date**, unlike Task 2's finding on
+`download.bls.gov` (HEAD `Content-Length` 350,208,884 vs. ranged-GET `Content-Range` total
+47,300,620 for the CES flat file — an unexplained ~7.4x divergence). Per this task's
+instruction, no cause is asserted for either host's behavior; this run simply records that
+the two hosts differed in this respect on 2026-08-10. (Separately, and not to be confused
+with the check above: the zip member's own `compress_size` field, 287,026,235, is 184
+bytes less than `bytes_on_disk`, 287,026,419 — that gap is ordinary single-member zip
+container overhead, i.e. local file header, central directory record, end-of-central-directory
+record, around the one compressed CSV stream, not a transport anomaly. Both numbers come
+from the same downloaded file; there is nothing to reconcile against a second, independent
+source the way the Content-Length-vs-bytes-on-disk check above does.)
+
+Peak RSS of this measurement (the probe process streaming the download and counting
+newlines chunk-by-chunk, never `.read()`-ing the CSV): **78,807,040 bytes (~75.2 MiB)** —
+roughly 102x (decimal, 8,000,000,000 / 78,807,040) to 109x (binary, 8,589,934,592 /
+78,807,040) under the 8 GB budget, confirming the streaming/chunked approach the script
+uses (never loading the ~2.2 GB decompressed CSV, let alone the ~14.6M-line file, into
+memory at once). This number describes *this probe's* memory use; it is not a measurement
+of Stage 5's differ, which does not exist yet — see the envelope arithmetic below for what
+this run does and does not say about that.
+
+**Envelope arithmetic (§1.4, informing Stage 5):** the measured decompressed member is the
+*full year* (four quarters concatenated in one CSV, per BLS's own singlefile format) —
+D_year = 2,199,079,362 bytes, exactly as measured above. This run did not download
+per-quarter files, so a single quarter's size is not measured directly; approximating it
+as an even split, D_quarter ≈ D_year / 4 = 549,769,840.5 bytes (~524 MiB) — an
+approximation, not a measurement, and it assumes the four quarters are close to equal size
+(plausible for a stable annual dataset, unverified here). A naive two-quarter in-memory
+diff — holding two quarters' decompressed CSV bytes simultaneously, before any parsing —
+would then hold ~2 × D_quarter = D_year / 2 ≈ 1,099,539,681 bytes (~1.02 GiB). Against
+the 8 GB peak-RSS budget (§1.4) — 8,000,000,000 bytes under the decimal convention, or
+8,589,934,592 bytes under the binary (GiB) convention — that raw-bytes figure **fits**
+either way, with roughly 7.3x (decimal) to 7.8x (binary) headroom
+(8,000,000,000 / 1,099,539,681 ≈ 7.28; 8,589,934,592 / 1,099,539,681 ≈ 7.81).
+
+That per-quarter framing rests on §8.3's stated (and, per the finding above, contradicted)
+premise that the diff unit is one quarter. The measured artifact is actually a full year,
+so the frame Stage 5 should also carry alongside the per-quarter one: if the differ ever
+needs two *whole-year* files in memory simultaneously (e.g. vintage-over-vintage rather
+than quarter-over-quarter), that is 2 × D_year = 4,398,158,724 bytes (~4.10 GiB) — still
+**fits**, but with only ~1.82x (decimal, 8,000,000,000 / 4,398,158,724) to ~1.95x (binary,
+8,589,934,592 / 4,398,158,724) headroom, a materially thinner margin than the per-quarter
+frame's ~7.3-7.8x. Which frame actually governs is a §8.3 design question this probe does
+not resolve (see the member-name finding above) — both numbers are reported so Stage 5
+does not have to re-derive either from raw measurements.
+
+That fits verdict is a **lower bound only**, and should be read as one: 1,099,539,681
+bytes counts decompressed CSV bytes, not the in-memory *parsed* footprint (DataFrame
+columns, dtype expansion, string interning, per-row Python object overhead if a naive
+row-oriented structure were used) that Stage 5's actual differ would carry — a quantity
+this probe does not measure and did not attempt to estimate with an invented multiplier,
+per this task's instruction. The raw-bytes headroom (~7.3-7.8x) is comfortable but finite;
+an unmeasured parse-overhead multiplier in that range or higher would erode it entirely.
+**Conclusion:** on this lower-bound evidence, Stage 5's differ *may* be able to
+materialize full quarters in memory rather than being forced into streaming joins — the
+raw file sizes alone do not rule it out — but this is provisional, not a green light: Stage
+5 must measure actual parsed-in-memory RSS directly (R18's memory-envelope gate) before
+relying on full materialization, since this probe's ~75 MiB peak RSS describes only the
+streaming *measurement* process above, not a parsed two-quarter diff. Diff cost itself
+(the join/compare work, as opposed to the load) is measured, not argued, at Stage 5
+(roadmap, issue 4).
 
 ## 5. Object-store endpoint capability matrix — §20 issue 14, §1.4, §17.4 (Task 6)
 
