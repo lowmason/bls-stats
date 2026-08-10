@@ -135,6 +135,27 @@ as of this probe.
 
 ## 3. HTML posture — §20 issue 1 (Task 4)
 
+**Current posture as of 2026-08-10.** Summary only — the chronological record below
+(original run, then the addendum) is the evidence; every claim here is traceable to a
+passage further down this section.
+
+- **Browser-shaped profile** (`_lib.BROWSER_HEADERS`): blocked (403, uniform Akamai
+  block page) on all six probed `www.bls.gov` surfaces — robots.txt, `.ics` schedule
+  feed, Atom release feed, errata table, news-release index, schedule index.
+- **Contact profile** (`_lib.CONTACT_HEADERS`): genuine HTTP 200 content on all six of
+  the same surfaces, counting the canary — `/errata/` via the canary, the other five via
+  the addendum (four by marker match; `schedule_index` by direct inspection of
+  `body_head` after its marker missed).
+- **For Stage 2:** this supports building `html`-profile ingest on the contact profile
+  and leaving the headless-browser backend (§7.2 mitigation 3) unbuilt-and-pluggable,
+  rather than treating headless as mandatory.
+- **Not established:** *why*. Mechanism is untested — which of the five headers that
+  differ between the two profiles (or their combination, or the internal Chrome-claim
+  inconsistency in the browser-shaped profile) is doing the work is not known (Confound
+  1). The profile-vs-sequence-position question is weakened but not eliminated: this
+  run's evidence is consistent with a profile effect, but a fully decisive,
+  same-session interleaved-profile probe was not run (Confound 2).
+
 What settles it: "a live probe across all three transport profiles … it determines the
 whole HTML ingest posture" — browser-shaped `httpx` sufficient, or headless mandatory.
 
@@ -151,16 +172,25 @@ receive an Akamai-generated block page), `content-length: 84713` on the wire
 `<title>Errata Home : U.S. Bureau of Labor Statistics</title>` with the real page's script
 includes (`dap.digitalgov.gov` analytics tag, `/javascripts/bls…`), not a challenge page.
 
-**This is the most consequential result in this run, not a footnote.** The canary and the
-`errata_table` browser-shaped probe (JSONL lines 1 and 5) hit the *identical* URL
-(`https://www.bls.gov/errata/`), ~15 s apart, from the same client IP, inside the same
-script run: the canary (contact UA) got 200 with real content; the browser-shaped request
-to the same URL got 403 (Akamai block). That is a controlled, same-URL, same-run A/B in
-which the plainer, cheaper, more-honestly-labeled transport passed exactly where the
-transport §7.2 was designed around (browser-shaped headers, meant to *look* more
-legitimate) failed. The likelier explanation is a UA/TLS-fingerprint mismatch — `httpx`
-sending a header claiming Chrome 126 without Chrome's actual TLS/HTTP-2 handshake is a
-textbook bot-management trigger, whereas a UA that doesn't claim to be a browser isn't
+**This is the most consequential result in this run, not a footnote.** *The causal
+explanation offered later in this paragraph (a UA/TLS-fingerprint mismatch) is withdrawn —
+and narrowed further on the evidence of `_lib.py` — by "Correction to the 'most
+consequential result' paragraph above" further down this section — read that before
+citing this paragraph's "likelier explanation" sentence. The underlying observation (a
+same-URL, same-run A/B where the contact UA passed and the browser-shaped profile failed)
+stands unmodified.* The canary and the `errata_table` browser-shaped probe (JSONL lines 1
+and 5) hit the *identical* URL (`https://www.bls.gov/errata/`), 8 s apart (JSONL
+`probed_at`: 22:22:36 for the canary, 22:22:44 for `errata_table` — corrected here from an
+earlier "~15 s" estimate; the tighter window leaves less room for a time-drift
+explanation, if anything strengthening this A/B comparison rather than weakening it), from
+the same client IP, inside the same script run: the canary (contact UA) got 200 with real
+content; the browser-shaped request to the same URL got 403 (Akamai block). That is a
+controlled, same-URL, same-run A/B in which the plainer, cheaper, more-honestly-labeled
+transport passed exactly where the transport §7.2 was designed around (browser-shaped
+headers, meant to *look* more legitimate) failed. The likelier explanation is a
+UA/TLS-fingerprint mismatch — `httpx` sending a header claiming Chrome 126 without
+Chrome's actual TLS/HTTP-2 handshake is a textbook bot-management trigger, whereas a UA
+that doesn't claim to be a browser isn't
 held to that consistency check — but the two arms also ran through separate
 `make_client()` contexts (separate TLS sessions) at different points in the six-request
 sequence, so **session position and IP-reputation drift across the run are not excluded**
@@ -206,7 +236,7 @@ divergence is structural, not a disagreement about the facts: the script's `bloc
 predicate is computed only over `browser` (`[r for r in records if r["surface"] !=
 "canary_contact_ua"]`) — by construction it can never see the canary, so it has no way to
 notice that the canary passed the *identical* `/errata/` URL that the browser-shaped
-request to that same URL failed on, in the same run, ~15 s apart, from the same IP (see
+request to that same URL failed on, in the same run, 8 s apart, from the same IP (see
 the canary paragraph and the errata-table table row above). The mechanical line correctly
 answers "did mitigation-2-as-configured pass" (no, on all six); it is not designed to
 answer, and does not answer, "is mitigation-3 the correct engineering response" — that
@@ -232,7 +262,13 @@ all of the above is a WAF property observed on 2026-08-10; §18.3 forbids treati
 stable — the posture is re-checked whenever an HTML surface starts failing in operation,
 and the recommended follow-up probe should itself be dated when it runs.
 
-**robots.txt — the cross-task item.** Task 2 found `download.bls.gov/robots.txt` returns
+**robots.txt — the cross-task item.** *Superseded below for `www.bls.gov`: this
+paragraph's "no policy text was retrieved... still fully open for both hosts" describes
+the state before the addendum's contact-profile pass retrieved and reproduced the full
+`www.bls.gov` robots.txt — see "robots.txt content and its bearing on this
+project's paths" further down this section for the current state. `download.bls.gov` and
+`data.bls.gov` remain as described here — unresolved by the addendum, which probed
+`www.bls.gov` only.* Task 2 found `download.bls.gov/robots.txt` returns
 404 (no document at that path; specs/bls-stats-stage1-findings.md §1). This run's
 `www.bls.gov/robots.txt` request (JSONL line 2) returned 403 — the same Akamai block page
 as every other browser-shaped surface here, not a robots.txt body. No policy text was
@@ -284,7 +320,7 @@ above (`probes/results/transport_html_contact-2026-08-10.jsonl`).
 | 2 | `.ics` schedule feed | 200 | Genuine ICS calendar: opens `BEGIN:VCALENDAR`, `PRODID:-//Department of Labor//Bureau of Labor Statistics//EN`. `content-type: text/calendar`. | **Pass** |
 | 3 | release feed (`empsit.rss`) | 200 | `<?xml version='1.0' encoding='UTF-8'?><feed xmlns="http://www.w3.org/2005/Atom">…<title>Employment Situation</title>…` — a well-formed Atom document, served with `content-type: application/rss+xml` on the wire despite the `.rss` path and the Atom body. This settles the flavor question for *this response*, on this date, under the *contact* profile: the pinned `transport_html.py`'s `<feed` marker would have matched had the browser-shaped request to this same URL not been blocked before returning a body — but that request never returned a body, so this run has no observation of what the browser-shaped profile would have been served, and BLS pairing an Atom body with an `application/rss+xml` content-type is exactly the kind of inconsistency that argues for Stage 2 parsing this feed defensively (checking for either root element) rather than keying ingestion on the `.rss` path or the content-type header. | **Pass** |
 | 4 | news-release index | 200 | Real BLS index page: `<title>Economic News Releases :  U.S. Bureau of Labor Statistics</title>`, same site template/analytics includes as the errata canary. | **Pass** |
-| 5 | schedule index | 200 | 302 redirect from `/schedule/` to `/schedule/2026/08_sched.htm`, then 200. Real page: `<title>Schedule of Selected Releases for August 2026</title>`, same `dap.digitalgov.gov` analytics tag and `/javascripts/bls-…` includes as every other genuine BLS page in this dataset. **The script's own marker (`"U.S. Bureau of Labor Statistics"`) did not match** — this page's `<title>` doesn't carry the site-wide suffix the other pages use — so the script recorded `outcome: "other"`, not `"pass"`. Direct inspection of `body_head` shows unambiguous genuine content, not a block page (`looks_like_block_page: false`, no `server: AkamaiGHost`, no "Access Denied" signature). Recorded as a pass on inspection, overriding the script's own marker miss. | **Pass** (on inspection; script recorded `other`) |
+| 5 | schedule index | 200 | 302 redirect from `/schedule/` to `/schedule/2026/08_sched.htm`, then 200. Real page: `<title>Schedule of Selected Releases for August 2026</title>`, same `dap.digitalgov.gov` analytics tag and `/javascripts/bls-…` includes as every other genuine BLS page in this dataset. **The script's own marker (`"U.S. Bureau of Labor Statistics"`) did not match** — this page's `<title>` genuinely doesn't carry the site-wide suffix the other pages use, but that's not the whole story: markers are checked only against `body_head`, and `_lib.probe()` truncates `body_head` to the first 500 decoded bytes of the response (`r.content[:500]`); `keep_body` was not set for this surface, so nothing past that window was ever recorded or searched. The marker miss is therefore partly a truncation artifact, not solely a title-wording difference — this run has no evidence either way about what, if anything, lies past byte 500 here. (Observation for future re-probes, not a change to this run: neither of this dataset's two candidate template strings survives the 500-byte truncation reliably — `newsrels_index`'s `body_head` contains the title suffix within its first 500 bytes but not the `dap.digitalgov.gov` analytics-tag include, which its leading whitespace pushes past the cutoff; `schedule_index`'s `body_head` contains the analytics-tag include within its first 500 bytes but not the title suffix, which its own title lacks. A future fix needs `keep_body=True`, or a marker validated against the full body rather than a different 500-byte-window string.) Direct inspection of `body_head` shows unambiguous genuine content, not a block page (`looks_like_block_page: false`, no `server: AkamaiGHost`, no "Access Denied" signature). Recorded as a pass on inspection, overriding the script's own marker miss. | **Pass** (on inspection; script recorded `other`) |
 
 All five requests returned HTTP 200 with genuine BLS content; **zero Akamai-style blocks
 occurred in this run.** None of the five responses carried a `server` header.
@@ -357,8 +393,10 @@ wanted.
 genuine-content response across both runs — the original canary and all five of this
 addendum's passes — carried no `server` response header. Every one of the six
 Akamai-block responses in the run above carried `server: AkamaiGHost`. No mechanism claim
-follows from this; it is recorded as a consistent, repeated correlation across seven
-successful and six blocked responses on this date.
+follows from this; it is recorded as a consistent, repeated correlation across six
+successful and six blocked responses on this date (the canary plus the addendum's five
+passes on one side; all six browser-shaped requests on the other — matching the
+enumeration two sentences above, not the "seven" this sentence originally said).
 
 **Correction to the "most consequential result" paragraph above (added by this
 addendum).** That paragraph states: *"The likelier explanation is a UA/TLS-fingerprint
@@ -374,6 +412,20 @@ the operative variable. The paragraph's underlying *observation* (a same-URL, sa
 where contact passed and browser-shaped failed) stands unmodified; the causal explanation
 offered for it does not, and is treated from this addendum forward as untested.
 
+The withdrawal is in fact stronger than the paragraph above states, once `_lib.py` is
+read rather than assumed. `_lib.make_client()` builds both the contact-profile and the
+browser-shaped clients with identical `http2=True`, identical `timeout`, and identical
+`follow_redirects=True` — the only argument that differs between the two branches is the
+`headers` dict (`CONTACT_HEADERS` vs. `BROWSER_HEADERS`). Both arms therefore ran over the
+same underlying `httpx` TLS/HTTP-2 client stack; a genuine TLS-*fingerprint* difference
+between the two requests could not have existed, because nothing in the TLS/HTTP-2 layer
+itself was varied. What remains conceivable is narrower than "TLS-fingerprint mismatch" as
+originally worded: an interaction between the claimed User-Agent header and that one
+shared TLS/HTTP-2 handshake (a Chrome-claiming header riding a handshake that isn't
+Chrome's) is not ruled out by this data — but it is untested by either run, exactly as the
+rest of this correction says, and no claim about what *did* cause the blocks follows from
+noting it.
+
 **Verdict (issue 1) — revised after this addendum.** The verdict recorded above answered
 one question decisively — mitigation 2, as currently configured, fails on every surface
 tried — and left a second question open: whether mitigation 3 (headless) is the necessary
@@ -385,8 +437,15 @@ completely:
   all six probed `www.bls.gov` surfaces. The contact profile exactly as
   `_lib.CONTACT_HEADERS` configures it returned HTTP 200 with genuine content on all six
   distinct `www.bls.gov` surfaces tried across both runs (`/errata/` via the canary; the
-  other five via this addendum) — a clean, uniform result with zero exceptions on either
-  side.
+  other five via this addendum) — a clean, uniform result on HTTP status (200 on all six,
+  403 on none) and on content genuineness (no Akamai block page on any of the six). It is
+  not literally zero exceptions on the *adjudication* axis: of the addendum's five
+  surfaces, four passed by marker match (`outcome: "pass"` in the JSONL — robots.txt,
+  `.ics` schedule, release feed, news-release index) and the fifth, `schedule_index`,
+  passed only on direct inspection of `body_head` after its marker missed (`outcome:
+  "other"` in the JSONL; see the table row above and the discussion below). That one
+  script-level exception travels with this headline claim rather than being papered over
+  by it.
 - **Not established:** *why*. Confound 1 (five headers plus an internal inconsistency)
   means no claim about the User-Agent specifically, about TLS/HTTP-2 fingerprinting, or
   about "browser-shaped headers are counterproductive," follows from this data — those are

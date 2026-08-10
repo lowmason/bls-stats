@@ -8,7 +8,7 @@
 
 Why this script exists (see specs/bls-stats-stage1-findings.md §3): that run's canary
 (contact profile, one request, `/errata/`) got 200; the browser-shaped pass over six
-surfaces — including that same `/errata/` URL ~15 s later — got 403 on every one, an
+surfaces — including that same `/errata/` URL 8 s later — got 403 on every one, an
 identical 1,323-byte Akamai block page. That is a hole in the exit criterion ("posture
 stated per surface"), not a posture: 1 of 6 surfaces has a contact-profile data point,
 0 of 6 has a passing browser-shaped one. This script fills in the other five surfaces
@@ -65,7 +65,7 @@ def _looks_like_block_page(rec: dict, head_lower: str) -> bool:
     'Access Denied' and a `server: AkamaiGHost` response header. A marker match alone
     isn't enough to call a surface passing if this signature is also present."""
     server = (rec.get("headers") or {}).get("server", "")
-    return "access denied" in head_lower or server.lower() == "akamaighost"
+    return "access denied" in head_lower or "akamai" in server.lower()
 
 
 def _classify(rec: dict, matched: list[str], block_page: bool) -> str:
