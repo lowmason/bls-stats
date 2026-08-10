@@ -138,7 +138,73 @@ as of this probe.
 What settles it: "a live probe across all three transport profiles … it determines the
 whole HTML ingest posture" — browser-shaped `httpx` sufficient, or headless mandatory.
 
-*(recorded by Task 4)*
+**Probe:** `probes/transport_html.py`, run 2026-08-10
+(`probes/results/transport_html-2026-08-10.jsonl`).
+
+Canary (compliant contact UA, one request): 200 — **updates** the review-§0.3 baseline.
+Review §0.3 (cited at spec §7.2: "`www.bls.gov` returns 403 to plain `httpx` even with a
+contact User-Agent") predicts 403 for exactly this shape of request. JSONL line 1 shows
+none: HTTP/2 200, no `server` header (no Akamai front-door signature), `content-length:
+84713` on the wire (`content-encoding: gzip`) decoding to 249986 bytes of genuine page —
+`body_head` opens `<title>Errata Home : U.S. Bureau of Labor Statistics</title>` with the
+real page's script includes (`dap.digitalgov.gov` analytics tag, `/javascripts/bls…`),
+not a challenge page. This is one request, to one URL (`/errata/`), on one date — it does
+not establish that the compliant contact UA passes every `www.bls.gov` path, and per this
+task's non-negotiable rule it was not repeated or extended to other surfaces to check. It
+is recorded here as exactly what it is: a single dated data point that contradicts the
+review-§0.3 baseline at this one URL, worth Stage 2 re-examining before committing to
+browser-shaped-only as the HTML profile's design (see Verdict).
+
+| Surface | Browser-shaped status | Marker found | Posture |
+|---|---|---|---|
+| robots.txt | 403 | False | Blocked. `body_head` is an Akamai "Access Denied" page (`server: AkamaiGHost`, 1323 bytes, `Cache-Control: no-cache, no-store, must-revalidate`), not a robots.txt document — no Disallow rules are observable from this run. |
+| `.ics` schedule feed | 403 | False | Blocked. Identical 1323-byte Akamai block page. |
+| Atom release feed (`empsit.rss`) | 403 | False | Blocked. Identical 1323-byte Akamai block page. Because the surface never returned real content, this run also does not settle whether the pinned `<feed` marker (Atom's root element) is even the right string for a URL path named `.rss` — that question stays open behind the block. |
+| errata table (`/errata/`) | 403 | **True** (false positive) | Blocked. Same Akamai block page as the other five — its body happens to open with `<html lang="en-us">`, which satisfies the pinned `<html` marker even though no errata content was served. `marker_found: True` here is misleading in isolation; `status != 200` is what correctly keeps this surface out of "passing" per the script's own `blocked` logic. |
+| news-release index | 403 | **True** (false positive) | Blocked, same false-positive marker mechanism as errata table. |
+| schedule index | 403 | **True** (false positive) | Blocked, same false-positive marker mechanism as errata table. |
+
+All six browser-shaped requests returned byte-identical 1323-byte bodies with
+`server: AkamaiGHost` — a single, uniform Akamai bot-management block, not per-surface
+variation. Three of the six (errata table, news-release index, schedule index) show
+`marker_found: True` only because the pinned `<html` marker is weak enough that an Akamai
+challenge page satisfies it trivially; this run's overall verdict is unaffected because
+the script's `blocked` predicate requires `status == 200` first, and none of the six
+cleared that bar. A future rerun that gets a `200` with a WAF interstitial and this same
+weak marker could pass falsely — worth a harder marker (e.g. a phrase only the real page
+contains) if Stage 2 ever re-probes these surfaces, though per this task's rules the
+pinned script here is left as run, not edited.
+
+**Verdict (issue 1):** headless backend MANDATORY for: robots.txt, `.ics` schedule feed,
+Atom release feed, errata table, news-release index, schedule index — Stage 2 must
+include the §7.2-mitigation-3 worker for all six probed surfaces. This matches the
+script's own mechanical summary line (`HEADLESS BACKEND MANDATORY for: robots_txt,
+ics_schedule, atom_feed, errata_table, newsrels_index, schedule_index`) — no divergence
+between the mechanical check and the considered read once the three false-positive
+markers are accounted for (they don't change which surfaces cleared `status == 200`,
+which none did). Note: this is a WAF property observed on 2026-08-10; §18.3 forbids
+treating it as stable — the posture is re-checked whenever an HTML surface starts failing
+in operation. The canary result above is the reason this verdict is narrower than it
+looks: browser-shaped `httpx` is blocked everywhere it was tried today, but the one
+contact-UA request tried today was *not* blocked, on the one path it hit. Stage 2 should
+not read this as "compliant contact UA works for HTML" — that would over-generalize a
+single request — but it is a concrete, cheap thing worth a dedicated follow-up probe
+before committing engineering effort to a headless worker for all six surfaces.
+
+**robots.txt — the cross-task item.** Task 2 found `download.bls.gov/robots.txt` returns
+404 (no document at that path; specs/bls-stats-stage1-findings.md §1). This run's
+`www.bls.gov/robots.txt` request (JSONL line 2) returned 403 — the same Akamai block page
+as every other browser-shaped surface here, not a robots.txt body. No policy text was
+retrieved from either host this stage: `download.bls.gov` has no document at that path,
+and `www.bls.gov` never got past the WAF to reveal whether one exists there. The R12
+robots-policy question is therefore still fully open for both hosts under the profiles
+tested so far — this run neither confirms nor rules out a published policy at
+`www.bls.gov`, and even if it had returned one, a `www.bls.gov` policy would describe
+`www.bls.gov` only; it would say nothing by itself about `download.bls.gov` or
+`data.bls.gov`. (Whether the compliant contact-UA profile would reach
+`www.bls.gov/robots.txt` is unprobed here — the canary spent its one contact-UA request on
+`/errata/`, per this task's one-canary rule — and is a candidate for a future, separate,
+single-request probe rather than a retry within this one.)
 
 ## 4. QCEW singlefile sizes — §20 issue 4, sizes half (Task 5)
 
