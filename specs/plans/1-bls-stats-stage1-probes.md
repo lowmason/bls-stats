@@ -50,7 +50,19 @@ Copied from the spec; every task's requirements include these.
 
 ## Execution-time inputs (stop and ask your human partner if missing)
 
-1. **Task 6:** deployment object-store endpoint — `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`,
+0. **Task 6, development endpoint (known — this workstation, verified 2026-08-10):** MinIO
+   (Homebrew) runs via the LaunchAgent `~/Library/LaunchAgents/com.lowell.minio.plist`, serving
+   `/Users/lowell/S3` at `http://localhost:9000` (console `:9001`), modern single-drive layout
+   (`.minio.sys` present). No `bls-stats` bucket exists yet — correct: Stage 2 creates the real
+   buckets from Task 7's sheet. For the probe, export `AWS_ENDPOINT_URL=http://localhost:9000`
+   and set `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from the plist's `EnvironmentVariables`
+   (`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` — read with
+   `plutil -p ~/Library/LaunchAgents/com.lowell.minio.plist`; never commit the values). This is
+   the **root** credential, so expect the delete-deny check to report NOT ENFORCED for it — that
+   is the §17.4 finding that Stage 2 needs a distinct non-admin runtime credential, not a probe
+   bug. Probe buckets will appear as `/Users/lowell/S3/bls-stats-probe-*` and are deleted;
+   existing buckets (`alt-nfp`, `bls-stats-old`) are never touched.
+1. **Task 6, deployment endpoint:** `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`,
    `AWS_SECRET_ACCESS_KEY` (and `AWS_REGION` if not `us-east-1`).
 2. **Task 6:** shell access to a deployment-side dev container (§20 issue 14 is precisely
    "reachable from the container network?").
@@ -1125,15 +1137,18 @@ Run: `env -u AWS_ENDPOINT_URL uv run probes/objstore_capabilities.py --context s
 Expected: exits with `error: AWS_ENDPOINT_URL required (§1.4: the endpoint is configuration)` —
 no network touched.
 
-- [ ] **Step 3: Run against the development endpoint (if one is provisioned)**
+- [ ] **Step 3: Run against the development endpoint (local MinIO — see execution-time input 0)**
 
-Run, with the dev endpoint's env exported (e.g. a local MinIO/loopback service):
+Run, with the env from execution-time input 0 exported (endpoint `http://localhost:9000`,
+credentials from the LaunchAgent plist):
 `uv run probes/objstore_capabilities.py --context workstation-dev`
 Expected: one line per check ending in `results: probes/results/objstore-workstation-dev-...json`
-plus the JSON matrix; both probe buckets report `cleaned up`. The ~95 s wait for the lock
-retention to lapse is normal. If no dev endpoint is provisioned, skip and record exactly that in
-findings ("dev endpoint: not provisioned at probe time") — §1.4 already warns the dev endpoint
-differs from deployment in both directions, so the deployment matrix is the load-bearing one.
+plus the JSON matrix; both probe buckets report `cleaned up` (they materialize under
+`/Users/lowell/S3/` while they exist). The ~95 s wait for the lock retention to lapse is normal.
+Expected MinIO nuances, all findings rather than failures: the delete-deny check reports NOT
+ENFORCED for the root credential (input 0), and versioning/object-lock/conditional-PUT support
+depends on the MinIO release — record whatever the matrix says. §1.4: this endpoint is a dev
+convenience; the deployment matrix is the load-bearing one.
 
 - [ ] **Step 4: Run against the deployment endpoint, from the workstation**
 
