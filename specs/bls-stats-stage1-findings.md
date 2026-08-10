@@ -534,7 +534,7 @@ disambiguates rows, or whether each release simply appends/overwrites the whole 
 rows).
 
 **The contradiction has a direction, and it matters which way it runs.** §8.3's stated
-hazard (spec line 996-998) is *over-deletion*: if the differ treated absence-from-a-file as
+hazard is *over-deletion*: if the differ treated absence-from-a-file as
 deletion across the whole `program × ref_year` partition while the artifact only covers one
 quarter, "every non-Q1 release would mass-delete the other three quarters." §8.3's fix is
 to scope `deleted` rows to `artifact.authoritative_scope`, which R13 settled as per-quarter
