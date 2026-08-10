@@ -15,41 +15,74 @@ before anything else is built."
 
 | Check | Result |
 |---|---|
-| `download.bls.gov` robots.txt | 404 (IIS "File or directory not found" page, `content-length: 1245`, no redirects). No robots.txt exists at this path on this host — no Disallow rules are observable from it. Whether a robots policy is published elsewhere (e.g. `www.bls.gov`) is unprobed and out of scope for this task. |
-| HEAD large LABSTAT file (`ce`) | 200; `Last-Modified: Fri, 07 Aug 2026 12:30:00 GMT`; `ETag: "094a5766826dd1:0"`; `Content-Length: 350208884` (~334 MiB, uncompressed) |
-| GET tiny mapping file (`ce.period`) | 200; `body_bytes` (decoded) = 419; on-wire `Content-Length: 209` (gzip-compressed) |
+| `download.bls.gov` robots.txt | 404 (IIS "File or directory not found" page, `content-length: 1245`, no redirects). No robots.txt exists at this path on this host — no Disallow rules are observable from it. Whether a robots policy is published elsewhere (e.g. `www.bls.gov`) is unprobed here — Task 4 probes `www.bls.gov/robots.txt`. |
+| HEAD large LABSTAT file (`ce`) | 200; `Last-Modified: Fri, 07 Aug 2026 12:30:00 GMT`; `ETag: "094a5766826dd1:0"`; `Content-Length: 350208884` (~334 MiB, as reported — no `Content-Encoding` or `Vary` on this response) |
+| GET tiny mapping file (`ce.period`) | 200; `body_bytes` (decoded) = 419; on-wire `Content-Length: 209` (`Content-Encoding: gzip`, `content-type: application/octet-stream`) |
 | HEAD second prefix (`jt`) | 200; `Last-Modified: Tue, 04 Aug 2026 14:00:00 GMT`; `ETag: "0f0e8a1924dd1:0"`; `Content-Length: 34414209` |
 | HEAD QCEW singlefile zip (`data.bls.gov`) | 200; `Content-Length: 304826526` (~291 MiB); `Last-Modified: Tue, 02 Sep 2025 11:29:43 GMT`; `ETag: "122b489e-63dcfcdf704e5"`. The 2024 `data.bls.gov/cew/data/files/2024/csv/2024_qtrly_singlefile.zip` URL pattern is confirmed live — no correction needed for Task 5. |
-| Ranged GET (`bytes=0-1023`) | 206 — honored. `Content-Range: bytes 0-1023/47300620`. Note: 47300620 is the size of the **gzip-compressed** representation, not the 350208884-byte uncompressed size the plain HEAD (row 2) reported for the same URL — see Consequences. |
+| Ranged GET (`bytes=0-1023`) | 206 — honored. `Content-Range: bytes 0-1023/47300620`; `content-type: text/plain`; `Content-Encoding: gzip`; `Vary: Accept-Encoding`. Same URL, same `ETag: "094a5766826dd1:0"`, and same `Last-Modified` as the plain HEAD above, but that HEAD reported `Content-Length: 350208884` and `content-type: application/octet-stream` — the total and the content-type diverge on an identical validator. See Consequences for what this does and doesn't establish. |
 | HTTP version negotiated | h2 (HTTP/2) on every one of the six requests, on both `download.bls.gov` and `data.bls.gov` |
 | Content-Encoding under pinned `Accept-Encoding: gzip` | `gzip`, observed on every GET response that carries a body (`ce.period`; the ranged slice of `ce.data.0.AllCESSeries`, both with `Vary: Accept-Encoding`). HEAD responses omit `Content-Encoding` (no body is sent). The QCEW `.zip` (already compressed) is served with no additional Content-Encoding — no double compression. |
 
-**Verdict (issue 2):** CONFIRMED — the compliant contactable-UA profile is not blocked on
-either flat-file host. All four data-bearing checks (HEAD `ce.data.0.AllCESSeries`, GET
-`ce.period`, HEAD `jt.data.1.AllItems`, HEAD the QCEW singlefile zip on `data.bls.gov`)
-returned 200 with full Last-Modified/ETag/Content-Length metadata, and the ranged GET
-returned 206 with Range honored. Only `robots.txt` at `download.bls.gov/robots.txt`
-returned 404 (no document at that path) — this is why the probe script's own console
-line printed `INGEST CHANNEL NOT CONFIRMED`: its `ok` check requires all five
-non-ranged requests to equal exactly 200, which is a stricter bar than the compliance
-question it stands in for. A 404 is not a block: it is not 403 and not an
-`httpx.HTTPError`, and none of the other `download.bls.gov` endpoints show any sign of
-being throttled or refused. The ingest channel for actual data retrieval is locked; the
-robots.txt absence is recorded here as a separate, minor finding, not a channel
-failure.
+**Verdict (issue 2):** CONFIRMED for data retrieval — the compliant contactable-UA
+profile is not blocked on either flat-file host — **with the robots policy for
+`download.bls.gov` unresolved** (no `robots.txt` was served at that path; see below).
+All four data-bearing checks (HEAD `ce.data.0.AllCESSeries`, GET `ce.period`, HEAD
+`jt.data.1.AllItems`, HEAD the QCEW singlefile zip on `data.bls.gov`) returned 200 with
+full Last-Modified/ETag/Content-Length metadata, and the ranged GET returned 206 with
+Range honored. Only `robots.txt` at `download.bls.gov/robots.txt` returned 404 (no
+document at that path) — this is why the probe script's own console line printed
+`INGEST CHANNEL NOT CONFIRMED`: its `ok` check requires all five non-ranged requests to
+equal exactly 200, which is a stricter bar than the compliance question it stands in
+for. A 404 is not a block: it is not 403 and not an `httpx.HTTPError`, and none of the
+other `download.bls.gov` endpoints show any sign of being throttled or refused. The
+ingest channel for actual data retrieval is locked; the robots.txt absence is recorded
+here as a separate, minor finding, not a channel failure, and carried forward below.
 
 **Consequences:** Last-Modified and ETag are both present on every flat-file response
 observed (CES, `ce.period`, JOLTS on `download.bls.gov`; the QCEW zip on
 `data.bls.gov`) → §6.1 change detection has both signals available for all four file
 families probed. Range is honored (206) → resumable streaming is available to Stage
-2's transport, but with a caveat: the Content-Range total (47300620 bytes) reflects the
-gzip-compressed representation, not the uncompressed Content-Length a plain HEAD
-reports for the same URL (350208884 bytes). Stage 2's range-based downloader must
-account for this when the compliant `Accept-Encoding: gzip` header is pinned — either
-compute byte offsets against the compressed size actually being ranged over, or omit
-gzip `Accept-Encoding` specifically for range-based bulk transfers to get uncompressed
-range semantics matching HEAD's reported size. HTTP/2 is negotiated on every request to
-both hosts.
+2's transport, but with a caveat that this single probe only partially resolves.
+JSONL line 2 (plain HEAD on `ce.data.0.AllCESSeries`) reports `Content-Length:
+350208884` and `content-type: application/octet-stream`; JSONL line 6 (ranged GET, same
+URL, same `ETag: "094a5766826dd1:0"`, same `Last-Modified`) reports `Content-Range:
+bytes 0-1023/47300620` (roughly 7.4x smaller) and `content-type: text/plain`. That the
+ranged response also carries `Content-Encoding: gzip` while the HEAD carries none is not
+by itself informative — HEAD responses on this host omit `Content-Encoding` because no
+body is sent (see the Content-Encoding row above), so its absence on line 2 is expected
+regardless of what representation is being served. The content-type divergence is the
+stronger signal: JSONL line 3 (`ce.period`) shows that on this host `Content-Encoding:
+gzip` alone does not flip `content-type` away from `application/octet-stream` — that
+response is gzip-encoded and still reports `content-type: application/octet-stream` — so
+the ranged GET's `text/plain` is not explained by gzip encoding alone. Combined with the
+size divergence, this is **consistent with** the ranged GET running over an
+on-the-fly-gzipped encoding of the same resource — but it is at least as consistent with
+a separately stored, statically pre-compressed sibling representation, and this probe
+did not run any request that could distinguish the two. Nor did it establish whether the
+47300620-byte stream is byte-stable across requests: lines 2 and 6 carry the identical
+ETag despite reporting different sizes and content-types, so that ETag does not
+distinguish the two representations at a single instant and cannot be assumed to change
+if the compressed stream does — it remains a valid change-detection signal for §6.1 (did
+the source file change) but is not a signal for which representation was served. Stage 2
+therefore has two design options on the table, **neither validated by this probe**:
+computing byte offsets against the compressed size actually being ranged over (requires
+first confirming that stream is stable across requests — unverified here, and a false
+assumption would silently corrupt a resumed download); or omitting `Accept-Encoding:
+gzip` specifically for range-based bulk transfers to get range semantics against the
+uncompressed size HEAD reports (a request shape this probe never issued, so also
+unverified, though it carries less risk since it sidesteps the stability question
+rather than depending on it — the likelier default for Stage 2 pending a dedicated
+probe). HTTP/2 is negotiated on every request to both hosts.
+
+The robots-policy question for `download.bls.gov` is open, not closed: JSONL line 1
+records a plain 404 (IIS "File or directory not found," no redirects) for
+`download.bls.gov/robots.txt`, which rules out a *published Disallow rule at that path*
+but is not evidence of a block — the four data-serving checks above all returned 200 and
+none of them show throttling or refusal. Task 4's probe of `www.bls.gov/robots.txt` is
+the next place this gets a data point, though a policy found there would describe a
+different host and would not by itself resolve whether `download.bls.gov` publishes (or
+implies) one.
 
 ## 2. API surface — §7.1 `api` profile (Task 3)
 
