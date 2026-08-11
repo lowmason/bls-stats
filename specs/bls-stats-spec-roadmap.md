@@ -88,7 +88,7 @@ Every ROUTING is `writing-plans`: after the critique round-trip, no stage's desi
         locked (issue 2); bucket-creation parameters are written down before any bucket exists.
       ROUTING: writing-plans
       Stage 1: COMPLETE WITH ONE OPEN ITEM (2026-08-10) — implemented by plan 1
-        (specs/plans/1-bls-stats-stage1-probes.md). Findings:
+        (specs/plans/completed/1-bls-stats-stage1-probes.md). Findings:
         specs/bls-stats-stage1-findings.md.
       Open: §20 issue 14 does not close in this stage — the deployment endpoint's address
         and reachability, and container→endpoint reachability, are unprobed, blocked on two
