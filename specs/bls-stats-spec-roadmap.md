@@ -74,7 +74,7 @@ Every ROUTING is `writing-plans`: after the critique round-trip, no stage's desi
 
 ## Stages
 
-- [ ] Stage 1: Ground-truth probes (investigation)
+- [x] Stage 1: Ground-truth probes (investigation)
       Objective: Settle the probe-resolvable unknowns that gate irreversible Stage-2 decisions;
         exit artifact is a written finding, not software.
       Spec: §20 issues 1, 2, 4 (sizes), 14, 15 (mechanism); §1.4; §7.1–§7.2; §7.3
@@ -87,6 +87,17 @@ Every ROUTING is `writing-plans`: after the critique round-trip, no stage's desi
       Exit: each §20-cited probe has a dated result and method; the ingest channel is confirmed
         locked (issue 2); bucket-creation parameters are written down before any bucket exists.
       ROUTING: writing-plans
+      Stage 1: COMPLETE WITH ONE OPEN ITEM (2026-08-10) — implemented by plan 1
+        (specs/plans/completed/1-bls-stats-stage1-probes.md). Findings:
+        specs/bls-stats-stage1-findings.md.
+      Open: §20 issue 14 does not close in this stage — the deployment endpoint's address
+        and reachability, and container→endpoint reachability, are unprobed, blocked on two
+        operator inputs: deployment-endpoint credentials and a deployment-side container
+        shell/runtime (findings §5). §17.3's writer-lease contention question is unanswered
+        for the same reason. Close before or during Stage 2, which consumes the endpoint
+        capability matrix (findings §5) and executes the bucket-creation sheet (findings
+        §7) that depends on it. All other Stage-1 exit criteria are met.
+      Next: resume the roadmap.
 
 - [ ] Stage 2: Capture plane (M0)
       Objective: Permanent byte capture for every in-scope artifact — the lock-free plane,

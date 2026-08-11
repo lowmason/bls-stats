@@ -1,0 +1,73 @@
+{
+  "probed_at": "2026-08-10T23:37:31+00:00",
+  "context": "workstation-dev",
+  "endpoint_host": "127.0.0.1",
+  "region": "us-east-1",
+  "checks": [
+    {
+      "check": "reachability.list_buckets",
+      "outcome": "ok",
+      "detail": "2 buckets visible"
+    },
+    {
+      "check": "create_bucket.plain",
+      "outcome": "ok",
+      "detail": "created"
+    },
+    {
+      "check": "conditional_put.if_none_match",
+      "outcome": "ok",
+      "detail": "enforced (PreconditionFailed)"
+    },
+    {
+      "check": "versioning",
+      "outcome": "ok",
+      "detail": "status=Enabled, versions_after_two_puts=2"
+    },
+    {
+      "check": "object_lock.create_enabled",
+      "outcome": "ok",
+      "detail": "Enabled"
+    },
+    {
+      "check": "object_lock.put_retention",
+      "outcome": "ok",
+      "detail": "GOVERNANCE +90s on version d73a3374-e800-4092-a820-2c57bc31269a"
+    },
+    {
+      "check": "object_lock.delete_denied",
+      "outcome": "ok",
+      "detail": "enforced (InvalidRequest)"
+    },
+    {
+      "check": "object_lock.default_retention_with_duration",
+      "outcome": "ok",
+      "detail": "default retention GOVERNANCE/3650d accepted (a *duration* \u2014 \u00a717.4)"
+    },
+    {
+      "check": "delete_deny_policy",
+      "outcome": "ok",
+      "detail": "NOT ENFORCED for this credential (admin/root bypasses bucket policy?) \u2014 Stage 2 needs a distinct runtime credential"
+    },
+    {
+      "check": "lifecycle_api",
+      "outcome": "ok",
+      "detail": "accepted, 1 rule(s) readable"
+    },
+    {
+      "check": "replication_api",
+      "outcome": "ok",
+      "detail": "API present, none configured (ReplicationConfigurationNotFoundError)"
+    },
+    {
+      "check": "timings_1KiB",
+      "outcome": "ok",
+      "detail": {
+        "put_ms_median": 1.4,
+        "head_ms_median": 1.1,
+        "get_ms_median": 1.1,
+        "list_ms_median": 0.9
+      }
+    }
+  ]
+}
