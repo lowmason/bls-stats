@@ -32,13 +32,21 @@ All four data-bearing checks (HEAD `ce.data.0.AllCESSeries`, GET `ce.period`, HE
 `jt.data.1.AllItems`, HEAD the QCEW singlefile zip on `data.bls.gov`) returned 200 with
 full Last-Modified/ETag/Content-Length metadata, and the ranged GET returned 206 with
 Range honored. Only `robots.txt` at `download.bls.gov/robots.txt` returned 404 (no
-document at that path) — this is why the probe script's own console line printed
-`INGEST CHANNEL NOT CONFIRMED`: its `ok` check requires all five non-ranged requests to
-equal exactly 200, which is a stricter bar than the compliance question it stands in
-for. A 404 is not a block: it is not 403 and not an `httpx.HTTPError`, and none of the
-other `download.bls.gov` endpoints show any sign of being throttled or refused. The
-ingest channel for actual data retrieval is locked; the robots.txt absence is recorded
-here as a separate, minor finding, not a channel failure, and carried forward below.
+document at that path) — this is why the probe script's own console line, **as printed
+for this recorded run**, read `INGEST CHANNEL NOT CONFIRMED`: at the time of this run,
+the script's `ok` check required all five non-ranged requests to equal exactly 200,
+folding the ancillary robots.txt check into the same gate as the four data-bearing
+checks — a stricter bar than the compliance question it stands in for. Commit
+`e6ebed0` (operator-authorized, after this run) narrowed that predicate to gate only on
+the four data-bearing checks plus the ranged GET, reporting the robots.txt result on
+its own line instead of folding it into the pass/fail. **The recorded run's printed
+line above reflects the original, unnarrowed predicate** — neither the JSONL evidence
+nor this section's verdict changes — and a re-run against equivalent results (four
+200s, one 206, robots.txt 404) would now print `INGEST CHANNEL CONFIRMED`. A 404 is not
+a block: it is not 403 and not an `httpx.HTTPError`, and none of the other
+`download.bls.gov` endpoints show any sign of being throttled or refused. The ingest
+channel for actual data retrieval is locked; the robots.txt absence is recorded here as
+a separate, minor finding, not a channel failure, and carried forward below.
 
 **Consequences:** Last-Modified and ETag are both present on every flat-file response
 observed (CES, `ce.period`, JOLTS on `download.bls.gov`; the QCEW zip on
@@ -530,6 +538,15 @@ Diff *cost* is measured at Stage 5 (roadmap).
 now superseded by measurement. This is the stage's one full-file download (Global
 Constraints); eight sequential HEADs (2019–2026) preceded the single streaming GET, ≥2 s
 apart throughout, per `_lib.probe`.
+
+**Script provenance note.** `probes/qcew_sizes.py` was amended after this run (commit
+`78e6865`, operator-authorized) to add a status check before any bytes are written to
+disk, make the scratch-file cleanup unconditional (`try`/`finally`), and stamp
+`probed_at` on every record. The committed JSONL above predates those changes — it was
+produced by the pre-fix script — so its `downloaded` record below carries no `status`,
+`http_version`, or `content_length` field, and its `downloaded`/per-member/`peak_rss_bytes`
+records carry no `probed_at`. No measured figure (bytes, line counts, RSS) changes; only
+additional provenance fields exist in runs made after this fix.
 
 Per-year singlefile zip (HEAD Content-Length):
 
