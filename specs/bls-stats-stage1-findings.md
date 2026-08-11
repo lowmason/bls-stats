@@ -933,7 +933,7 @@ the real raw bucket — once written, it is immutable for the full duration abse
 governance-bypass delete. Key it as an explicit verification artifact, not operational data, since
 it cannot simply be deleted afterward.
 
-**If the gate fails — remediation, not just a stop.** Step 4 says first capture does not proceed;
+**If the gate fails — remediation, not just a stop.** These remediation steps are reasoned from the bucket's stated constraints but were not exercised by any probe in this stage — they are derived, not demonstrated. Stage 2 should treat them as best-available guidance and verify recovery as it proceeds. Step 4 says first capture does not proceed;
 it does not say what to do with the bucket that failure leaves behind. `ObjectLockEnabledForBucket`
 is already `true` on it and that cannot be undone (§7.3), and — per the Versioning row above,
 already `Enabled` by the time this gate runs (object-lock enablement forces versioning on regardless)
