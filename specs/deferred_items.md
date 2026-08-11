@@ -16,7 +16,10 @@
    has a working replication API, otherwise the second-endpoint pull job (option B). Default is
    the pull job (B) until that evidence exists.
 
-3. **Spec amendment: §7.1's `html` profile row and §7.2's mitigation ladder.**
+3. ~~**Spec amendment: §7.1's `html` profile row and §7.2's mitigation ladder.**~~ → **done
+   2026-08-11, commit `9cf6cc6`**, ahead of plan 2 rather than during it: a plan copies its
+   Global Constraints verbatim from the spec, so the stale text would have propagated the
+   blocked profile into the plan. Original entry, for the record:
    `specs/bls-stats-spec.md` §7.1 (~line 721) still specifies "full browser-shaped headers" for
    `www.bls.gov` — the exact configuration Stage 1 found blocked 6/6
    (`specs/bls-stats-stage1-findings.md` section 3), while the compliant contact profile

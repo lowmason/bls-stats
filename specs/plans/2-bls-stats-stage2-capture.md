@@ -126,6 +126,9 @@ Project-wide requirements, copied from the spec. Every task's requirements inclu
 - **No metadata *parsing*.** `tick --sweep` fetches and archives the `.ics`, feed, and errata
   surfaces as blobs with `fetch_log` records, "exactly like a data artifact" (§17.1). Ingesting
   those blobs into the ledger is `tick --write`, Stage 4.
+- **No notices surfaces.** §17.1's `--sweep` row names four sync surfaces; the inventory covers
+  three. The fourth, `notices sync`, needs the hand-enumerated subject-area registry that §12.5
+  and §20 issue 9 place at Stage 9 — there is no URL list to sweep yet. Deliberate, not a miss.
 - **No headless `HtmlFetcher`.** Left unbuilt-and-pluggable while the contact profile passes
   (§7.2 rung 4; findings §8).
 - **No `api` call path.** §7.1's `api` profile is configured but unused — §1.3 makes the API
@@ -287,7 +290,10 @@ markers = [
     "network: hits live BLS hosts; excluded from CI (spec 18.1)",
     "real_store: hits a live object-store endpoint (spec 16.1, 18.1)",
 ]
-addopts = "-m 'not network and not real_store'"
+# No `-m` here on purpose. An `addopts` marker expression is applied on every
+# invocation and WINS over --network / --real-store, so `pytest --real-store`
+# would deselect the very tests the flag exists to run. The conftest hook
+# below is the whole mechanism: unmarked by default, opt in by flag.
 ```
 
 - [ ] **Step 2: Write `src/bls_stats/config/settings.py`**
@@ -930,6 +936,19 @@ class GateResult:
     detail: str
 
 
+def assert_policy_covers(settings: Settings) -> None:
+    """The policy JSON is pinned verbatim (findings section 7) and names
+    `bls-stats-raw`, but the bucket comes from BLS_RAW_BUCKET. Point that at
+    another name and the delete-deny policy attaches to a bucket it does not
+    cover -- 17.4's hard requirement silently unenforced. Stop instead."""
+    if f"arn:aws:s3:::{settings.raw_bucket}/*" not in DELETE_DENY_POLICY:
+        raise RuntimeError(
+            f"BLS_RAW_BUCKET={settings.raw_bucket!r} is not the bucket the pinned "
+            f"delete-deny policy covers. Either use the operator-confirmed name "
+            f"(bls-stats-raw, findings section 7 decision 2) or re-open that "
+            f"decision -- do not edit the policy JSON in passing.")
+
+
 def _client(settings: Settings):  # type: ignore[no-untyped-def]
     return boto3.client(
         "s3",
@@ -1014,6 +1033,7 @@ def verify_delete_deny(s3, bucket: str, probe_key: str) -> list[GateResult]:  # 
 def create_buckets(settings: Settings, *, apply: bool) -> list[GateResult]:
     """Creation, in the sheet's row order, then every gate. `apply=False`
     prints the plan and touches nothing."""
+    assert_policy_covers(settings)
     s3 = _client(settings)
     results: list[GateResult] = []
     if not apply:
@@ -1047,6 +1067,7 @@ def create_buckets(settings: Settings, *, apply: bool) -> list[GateResult]:
 
 
 def verify_buckets(settings: Settings) -> list[GateResult]:
+    assert_policy_covers(settings)
     s3 = _client(settings)
     results = [verify_versioning(s3, settings.raw_bucket),
                verify_versioning(s3, settings.main_bucket)]
@@ -1137,6 +1158,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from bls_stats.objstore.buckets import (
     DELETE_DENY_POLICY,
     LOCK_INHERIT_CHECK_KEY,
@@ -1156,6 +1179,22 @@ def test_policy_is_the_findings_json_verbatim() -> None:
 
 def test_retention_carries_a_mode_and_a_duration() -> None:
     assert (RETENTION_MODE, RETENTION_DAYS) == ("GOVERNANCE", 3650)
+
+
+def test_policy_guard_stops_on_a_renamed_bucket() -> None:
+    """BLS_RAW_BUCKET is configurable; the pinned policy ARN is not. A
+    mismatch would attach delete-deny to a bucket it does not cover."""
+    from bls_stats.config.settings import Settings
+    from bls_stats.objstore.buckets import assert_policy_covers
+
+    def _settings(bucket: str) -> Settings:
+        return Settings(_env_file=None, aws_endpoint_url="http://x:9000",
+                        aws_access_key_id="k", aws_secret_access_key="s",
+                        bls_contact_email="t@example.invalid", raw_bucket=bucket)
+
+    assert_policy_covers(_settings("bls-stats-raw"))
+    with pytest.raises(RuntimeError, match="delete-deny policy"):
+        assert_policy_covers(_settings("something-else"))
 
 
 def test_gate_object_is_outside_the_content_addressed_namespace() -> None:
@@ -2141,6 +2180,7 @@ git commit -m "Add the fetch-log record and its per-record writer"
   - `default_path() -> Path` — package data, overridable via `BLS_ARTIFACTS_PATH`
   - `by_url(inventory) -> dict[str, Artifact]`
   - `parse_listing(html: str, prefix: str) -> tuple[str, ...]` (in `discover.py`)
+  - `parse_feed_links(html: str) -> tuple[str, ...]` (in `discover.py`)
 
 **Selection rule, stated once so the inventory is reviewable rather than arbitrary:**
 
@@ -2151,8 +2191,8 @@ git commit -m "Add the fetch-log record and its per-record writer"
 2. **Every non-`.data.` file in the prefix** — `.series`, the mapping files, `.txt`, `.release`.
    They are small, they change rarely, and **P6 makes metadata vintage data**: a mapping file that
    silently gains a code is a real event the store must be able to date.
-3. **The `www.bls.gov` metadata surfaces** — the `.ics` schedule feed, the per-program Atom release
-   feeds, the errata table. §17.1 puts the *fetch* half of `calendar sync` / `feed poll` /
+3. **The `www.bls.gov` metadata surfaces** — the `.ics` schedule feed, **every** in-scope
+   program's Atom release feed (enumerated in Step 4, not hand-listed), the errata table. §17.1 puts the *fetch* half of `calendar sync` / `feed poll` /
    `errata sync` in `tick --sweep`, "each retrieved surface archived as a blob with a `fetch_log`
    record, exactly like a data artifact". The feeds retain only ~12 entries, so P1's "a window not
    captured is gone" applies to them exactly as it does to a data file.
@@ -2170,6 +2210,11 @@ from bls_stats.capture.inventory import by_url, load_inventory
 
 IN_SCOPE = {"ces-n", "sae", "jolts", "jolts-state", "cps-ln", "bed", "qcew",
             "oews", "eci", "ecec", "ep"}
+
+# Filled in at Step 4 from `discover --feeds`: the in-scope programs BLS
+# actually publishes a release feed for. Not every program has one; recording
+# the observed set is what makes the assertion below mean something.
+PROGRAMS_WITH_FEEDS: set[str] = set()  # <- replace with the discovered set
 
 
 def test_every_in_scope_program_has_at_least_one_data_artifact() -> None:
@@ -2217,8 +2262,20 @@ def test_metadata_surfaces_are_present() -> None:
     poll and errata sync. Stage 4 has nothing to ingest otherwise."""
     urls = {a.url for a in load_inventory()}
     assert "https://www.bls.gov/schedule/news_release/bls.ics" in urls
-    assert any(u.startswith("https://www.bls.gov/feed/") for u in urls)
     assert "https://www.bls.gov/errata/" in urls
+
+
+def test_every_program_with_a_feed_has_it_archived() -> None:
+    """Feeds retain ~12 entries (spec 6.4), so an unarchived program feed is
+    a permanently lost window. Fill PROGRAMS_WITH_FEEDS from the --feeds
+    discovery pass: an `any(...)` assertion would pass with one feed forever
+    and never notice the other ten."""
+    feed_programs = {
+        p for a in load_inventory() if a.url.startswith("https://www.bls.gov/feed/")
+        for p in a.programs
+    }
+    assert PROGRAMS_WITH_FEEDS <= feed_programs, (
+        f"no archived feed for {PROGRAMS_WITH_FEEDS - feed_programs}")
 
 
 def test_no_superset_and_subset_of_the_same_data_file() -> None:
@@ -2278,6 +2335,7 @@ from bls_stats.transport.client import Transport
 from bls_stats.transport.profiles import build_profiles
 
 LISTING_URL = "https://download.bls.gov/pub/time.series/{prefix}/"
+FEED_INDEX_URL = "https://www.bls.gov/bls/rss.htm"
 _HREF = re.compile(r'href="([^"?]+)"', re.IGNORECASE)
 
 
@@ -2290,9 +2348,36 @@ def parse_listing(html: str, prefix: str) -> tuple[str, ...]:
     return tuple(seen)
 
 
+def parse_feed_links(html: str) -> tuple[str, ...]:
+    """Every /feed/*.rss href on the release-feed index.
+
+    Worth enumerating rather than hand-listing: the feeds retain only ~12
+    entries (spec 6.4), so a program feed nobody archived is a permanently
+    lost window -- P1's logic, applied to a surface 17.1 puts squarely in
+    this stage's sweep.
+    """
+    seen: dict[str, None] = {}
+    for href in _HREF.findall(html):
+        if "/feed/" in href and href.endswith(".rss"):
+            url = href if href.startswith("http") else f"https://www.bls.gov{href}"
+            seen.setdefault(url, None)
+    return tuple(seen)
+
+
 def main(prefixes: list[str]) -> int:
     settings = load_settings()
     with Transport(build_profiles(settings.bls_contact_email)) as transport:
+        if prefixes == ["--feeds"]:
+            transfer = transport.stream_get(FEED_INDEX_URL, "html")
+            if transfer.spool is None:
+                print(f"feeds: status={transfer.status_code} "
+                      f"error={transfer.error_class}", file=sys.stderr)
+                return 1
+            html = transfer.spool.read_bytes().decode("utf-8", "replace")
+            transfer.spool.unlink()
+            for url in sorted(parse_feed_links(html)):
+                print(f"feed\t{url.rsplit('/', 1)[-1]}\t{url}")
+            return 0
         for prefix in prefixes:
             url = LISTING_URL.format(prefix=prefix)
             transfer = transport.stream_get(url, "flatfile")
@@ -2330,9 +2415,21 @@ set -a; source .project.env; set +a
 uv run python -m bls_stats.capture.discover ce sm jt ln bd oe ci cm ep > /tmp/labstat.tsv
 ```
 
-⚠ **Politeness:** ten sequential GETs at the `flatfile` profile's 2-second pacing. Do not
-parallelise, do not re-run in a loop while iterating on the TOML — the output is a file, iterate on
-that.
+Then enumerate the release feeds — **check the index path against the generic `User-agent: *`
+block in a re-fetched `robots.txt` before this request**, per the Global Constraints rule:
+
+```bash
+uv run python -m bls_stats.capture.discover --feeds > /tmp/feeds.tsv
+```
+
+If `https://www.bls.gov/bls/rss.htm` does not resolve, find the current feed index from
+`https://www.bls.gov/bls/newsrels.htm` (already robots-cleared, findings §3) and record the URL you
+used as a `> Deviation:` note. Add one `[[artifact]]` per in-scope program's feed, keyed
+`feed.<slug>`, `profile = "html"`, `kind = "metadata"`.
+
+⚠ **Politeness:** ten sequential GETs at the `flatfile` profile's 2-second pacing, plus one or two
+for the feed index. Do not parallelise, do not re-run in a loop while iterating on the TOML — the
+output is a file, iterate on that.
 
 Prefix → program map (`bls-data-context` skill, `references/`): `ce` = CES-N · `sm` = SAE ·
 `jt` = JOLTS (and, if it carries state series, JOLTS-STATE) · `ln` = CPS-LN · `bd` = BED ·
@@ -2494,7 +2591,7 @@ def by_url(artifacts: Iterable[Artifact]) -> dict[str, Artifact]:
 uv run pytest tests/capture/test_inventory.py tests/capture/test_discover.py -v
 ```
 
-Expected: 8 passed. `test_every_in_scope_program_has_at_least_one_data_artifact` is the one that
+Expected: 9 passed. `test_every_in_scope_program_has_at_least_one_data_artifact` is the one that
 fails until every program has an entry — that is the point of it.
 
 - [ ] **Step 7: Write and run the network-marked reachability check**
