@@ -869,7 +869,7 @@ objects):
 
 | Parameter | raw bucket `bls-stats-raw` | main bucket `bls-stats-main` |
 |---|---|---|
-| Contents | `raw/blob/` (content-addressed blobs, never expire) **and** `attest/<release_event_id>` (timestamp proofs, §9.1/R5 — evidence-class, not a rebuild input) — both per `specs/bls-stats-spec.md` §9.2 (lines 1213-1215); not `raw/` alone | `log/`, `ledger/`, `store/`, `ops/` |
+| Contents | `raw/blob/` (content-addressed blobs, never expire) **and** `attest/<release_event_id>` (timestamp proofs, §9.1/R5 — evidence-class, not a rebuild input) — both per `specs/bls-stats-spec.md` §9.2 (lines 1213-1215); not `raw/` alone. Plus, one-off and not `<release_event_id>`-shaped: the `attest/_verify/lock-inherit-check` gate artifact this sheet itself writes (see "Post-creation verification" below) — recorded here so that key isn't mistaken for an undeclared prefix the way the original `raw/_verify/...` placement was. | `log/`, `ledger/`, `store/`, `ops/` |
 | Created | Stage 2 — only `ObjectLockEnabledForBucket` (Object lock row) is part of the `CreateBucket` call itself; versioning, default retention, the delete-deny policy, and lifecycle are each separate calls issued immediately afterward, in this sheet's row order (see the Object lock row and the required post-creation verification gate below) | Stage 2 |
 | Versioning | Enabled — **dev endpoint (2026-08-10 probe):** `versioning` check: "status=Enabled, versions_after_two_puts=2". Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet; a §17.4 hard requirement must not rest on dev-endpoint evidence alone at execution time. **Unlike the Object lock row, there is no fallback here: if re-verification shows the deployment endpoint doesn't support versioning, that is a stop, not a fallback** — conditional-PUT dedup, per-version `PutObjectRetention`, and compaction all assume versioning is on, and this sheet does not proceed to bucket creation until it is confirmed. | Enabled (same caveat) |
 | Object lock | Two separate calls, not one: (1) `ObjectLockEnabledForBucket=true`, part of `CreateBucket` itself — creation-only, cannot be added to an existing bucket; (2) immediately afterward, a distinct `PutObjectLockConfiguration` call setting default retention **GOVERNANCE, 3650 days** (a mode *and* a duration — §17.4). **Required gate before first capture:** see "Post-creation verification" immediately below this table — this row is not satisfied until that gate passes. | Off — §17.4 generation-swap GC must delete `gen=<n>/` |
@@ -902,11 +902,12 @@ Before Stage 2's capture loop writes its first real object, run this sequence ag
    `raw/blob/`. Default retention is a bucket-level setting (`PutObjectLockConfiguration`
    is not prefix-scoped), so this still exercises the inheritance path the gate needs to
    test; the choice of prefix only affects where the object lands, not whether it inherits.
-   `raw/blob/` is specifically the content-addressed namespace (§9.2, line 1214) that N11's
-   fixity sweep re-hashes against each object's own key — a verification marker keyed by an
-   arbitrary string rather than the SHA-256 of its bytes does not belong there: N11 re-hashing
-   it would find a key that no re-hash can ever match, a standing false fixity concern for the
-   life of the object. Two ways to avoid that were available: key the object by the SHA-256 of
+   `raw/blob/` is specifically the content-addressed namespace (§9.2, line 1214); N11 (spec line
+   2036) is defined as a sampled re-hash of "`raw/` blobs" against their content-addressed keys —
+   worded at the `raw/` level, not narrowed to `raw/blob/` in that line — so a verification marker
+   keyed by an arbitrary string rather than the SHA-256 of its bytes risks exactly the same problem
+   under either reading of N11's scope: re-hashing it would find a key that no re-hash can ever
+   match, a standing false fixity concern for the life of the object. Two ways to avoid that were available: key the object by the SHA-256 of
    its own bytes and let it land at the real `raw/blob/sha256=<hh>/<hh>/<sha256>` path (making
    it fixity-clean by construction), or place it outside `raw/blob/`'s namespace entirely. This
    sheet takes the second path — `attest/` (added to the Contents row above) already exists in
@@ -934,32 +935,48 @@ it cannot simply be deleted afterward.
 
 **If the gate fails — remediation, not just a stop.** Step 4 says first capture does not proceed;
 it does not say what to do with the bucket that failure leaves behind. `ObjectLockEnabledForBucket`
-is already `true` on it and that cannot be undone (§7.3) — the operator is left holding a bucket
-that may also contain a retained object, and recovery differs by exactly which assertion failed:
+is already `true` on it and that cannot be undone (§7.3), and — per the Versioning row above,
+already `Enabled` by the time this gate runs (object-lock enablement forces versioning on regardless)
+— a plain, unversioned delete of the throwaway object creates a **delete marker rather than removing
+a version**, exactly as the Stage-2 note below (under the delete-deny policy JSON) already documents
+for this same bucket. `DeleteBucket` fails with `BucketNotEmpty` while any version or delete marker
+remains, so "delete it, then `DeleteBucket`" is not sufficient in any branch below; every branch
+must list and remove **every version and every delete marker** of the throwaway object (the same
+pattern `probes/objstore_capabilities.py`'s own cleanup step uses on its throwaway probe buckets —
+section 5 above) before the bucket is actually empty. The operator is left holding a bucket that may
+also contain a retained object, and recovery differs by exactly which assertion failed:
 
 - **Step 1's assertion fails** (`GetObjectLockConfiguration` doesn't return
   `GOVERNANCE`/`3650`) — check whether step 2 still ran. If the throwaway object's
-  `GetObjectRetention` (step 3) shows no retention applied at all, inheritance genuinely did not
-  happen and the object is plain and deletable: delete it, then `DeleteBucket` on the now-empty
-  bucket. Object-lock enablement blocks deleting *retained objects*, not an empty bucket, so this
-  is a clean recovery — the bucket can be recreated under the **same** name once the
-  `PutObjectLockConfiguration` call is corrected and the gate is re-run.
+  `GetObjectRetention` (step 3) shows no retention applied to any of its versions, inheritance
+  genuinely did not happen and every version is plain and deletable: list all versions and delete
+  markers of the object, delete each by `VersionId`, then `DeleteBucket` on the now-empty bucket.
+  Object-lock enablement blocks deleting *retained* object versions, not an empty bucket, so once
+  every version and delete marker is gone this is a clean recovery — the bucket can be recreated
+  under the **same** name once the `PutObjectLockConfiguration` call is corrected and the gate is
+  re-run.
 - **Step 3's assertion fails on the duration specifically** (`Mode=GOVERNANCE` is present and
   correct, but `RetainUntilDate` is not ~3650 days out — e.g. the default was configured with the
-  wrong day count) — the object genuinely *is* retained, just under the wrong duration, so it
-  cannot be deleted normally. Because the mode is GOVERNANCE (not COMPLIANCE), the admin/root
-  credential's governance-bypass delete — already named above as "the deliberate break-glass" — can
-  remove it (see the break-glass note under the delete-deny policy below for what else that bypass
-  requires). Once removed, `DeleteBucket` the emptied bucket and recreate it under the same name
-  with the corrected default-retention duration.
+  wrong day count) — the retained version genuinely *cannot* be deleted normally. Because the mode
+  is GOVERNANCE (not COMPLIANCE), the admin/root credential's governance-bypass delete — already
+  named above as "the deliberate break-glass" — can remove that specific version (see the
+  break-glass note under the delete-deny policy below for what else that bypass requires); any
+  *other* versions or delete markers on the same key (e.g. from a prior failed attempt) still need
+  ordinary versioned deletes on top of that. Once every version and delete marker is gone,
+  `DeleteBucket` the emptied bucket and recreate it under the same name with the corrected
+  default-retention duration.
 - **Step 3's assertion fails and the mode itself came back wrong** (e.g. `COMPLIANCE` where
-  GOVERNANCE was intended, or any other non-bypassable state) — the object cannot be removed by any
-  credential, admin included, until the (wrong) retention period elapses years from now. The bucket
-  therefore cannot be emptied and cannot be deleted. Treat it as permanently unusable for capture:
-  do not write real data into it, and do not keep retrying bucket creation under its name. A
-  replacement bucket must be created under a **different** name — and per Decision 2 below, a name
-  change is not a free edit: it propagates into Stage 2's config and reopens that decision for
-  operator sign-off before this sheet is executed again.
+  GOVERNANCE was intended, or any other non-bypassable state) — check `RetainUntilDate` before
+  concluding anything about how long this lasts: this branch is defined by the *mode*, not the
+  *duration*, and a COMPLIANCE lock with a short (if still wrong) duration means waiting out days,
+  not treating the bucket as permanently lost. If `RetainUntilDate` is far out, the retained version
+  cannot be removed by any credential, admin included, until it elapses, so the bucket cannot be
+  emptied or deleted in any practical timeframe: treat it as unusable for capture — do not write real
+  data into it, and do not keep retrying bucket creation under its name. A replacement bucket must be
+  created under a **different** name — and per Decision 2 below, a name change is not a free edit: it
+  propagates into Stage 2's config and reopens that decision for operator sign-off before this sheet
+  is executed again. If `RetainUntilDate` is close enough to wait out, that is the cheaper path and
+  does not require a name change.
 
 In every branch, the gate is re-run against the (possibly renamed) bucket from step 1, and first
 capture waits for a clean pass — a failed run does not get silently retried under looser criteria.
