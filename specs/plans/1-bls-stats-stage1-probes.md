@@ -1,3 +1,6 @@
+**Status: COMPLETE (2026-08-11)** — executed via subagent-driven-development; deferred items in
+specs/deferred_items.md
+
 # Stage 1: Ground-Truth Probes — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: implement this plan task-by-task via
@@ -105,7 +108,7 @@ the same findings file). Task 7 needs Task 6's matrix. Task 8 needs everything.
     `BLS_CONTACT_EMAIL` (for the §7.1 contact UA) and `BLS_API_KEY` to Tasks 2–5.
 - Produces (used by Tasks 2–8): the findings skeleton, one numbered section per probe.
 
-- [ ] **Step 1: Write `probes/_lib.py`**
+- [x] **Step 1: Write `probes/_lib.py`**
 
 ```python
 # /// script
@@ -250,12 +253,17 @@ if __name__ == "__main__":
     print("_lib self-check OK")
 ```
 
-- [ ] **Step 2: Run the self-check**
+> Deviation: `probes/_lib.py`'s body-recording guard shipped as `if method == "GET" or
+> keep_body:`, not the plan's `if method == "GET":`. Necessary: Task 3's v2 POST passes
+> `keep_body=True` and parses the body, which would otherwise receive `""` and crash
+> `json.loads`. The plan's code block at HEAD still shows the superseded line.
+
+- [x] **Step 2: Run the self-check**
 
 Run: `uv run probes/_lib.py`
 Expected: `_lib self-check OK` (first run also resolves `httpx[http2]` into uv's cache).
 
-- [ ] **Step 3: Write `probes/README.md`**
+- [x] **Step 3: Write `probes/README.md`**
 
 ```markdown
 # Stage-1 ground-truth probes
@@ -281,7 +289,7 @@ Rules (spec §7.1, R12, §1.4):
   sheet — never here.
 ```
 
-- [ ] **Step 4: Write `specs/bls-stats-stage1-findings.md`** (skeleton; later tasks fill their
+- [x] **Step 4: Write `specs/bls-stats-stage1-findings.md`** (skeleton; later tasks fill their
   sections)
 
 ```markdown
@@ -346,12 +354,16 @@ creation (§7.3) — "the one storage decision that cannot be corrected later."
 *(recorded by Task 8)*
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add probes/_lib.py probes/README.md specs/bls-stats-stage1-findings.md
 git commit -m "Add Stage-1 probe scaffolding and findings skeleton"
 ```
+
+> Deviation: `probes/_lib.py` was later extended (by a parallel session, commit `6df1619`) to
+> load repo-root `.project.env` on import and take the contact address from `BLS_CONTACT_EMAIL`.
+> Commit `0237f5c` correspondingly rewrote parts of this plan mid-execution.
 
 ---
 
@@ -367,7 +379,7 @@ git commit -m "Add Stage-1 probe scaffolding and findings skeleton"
 - Produces: `probes/results/transport_flatfile-<date>.jsonl`; findings section 1 with the
   ingest-channel verdict later tasks and Stage 2 rely on.
 
-- [ ] **Step 1: Write `probes/transport_flatfile.py`**
+- [x] **Step 1: Write `probes/transport_flatfile.py`**
 
 ```python
 # /// script
@@ -445,12 +457,15 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Syntax smoke check (before touching a rate-limited host)**
+> Deviation: the script's verdict predicate was narrowed *after* the gate (commit `e6ebed0`) to
+> exclude the ancillary robots.txt check; the committed JSONL predates that change.
+
+- [x] **Step 2: Syntax smoke check (before touching a rate-limited host)**
 
 Run: `python3 -m py_compile probes/transport_flatfile.py && echo compiles`
 Expected: `compiles`
 
-- [ ] **Step 3: Live run**
+- [x] **Step 3: Live run**
 
 Run: `uv run probes/transport_flatfile.py`
 Expected: six status lines then `INGEST CHANNEL CONFIRMED: statuses=[200, 200, 200, 200, 200,
@@ -464,7 +479,10 @@ Still record the result in findings section 1 (a negative result is a finding), 
 raise it with your human partner — the roadmap gates Stage 2 on this channel being locked, and the
 next move (retry window, header adjustment, contact with BLS) is a judgment call, not a plan step.
 
-- [ ] **Step 4: Record findings section 1**
+> Deviation: the live run returned 404 (not 200) for `download.bls.gov/robots.txt`; that host
+> serves no robots.txt. The other four checks passed and the ranged GET returned 206.
+
+- [x] **Step 4: Record findings section 1**
 
 Replace section 1's `*(recorded by Task 2)*` with (fill values from the run output and the JSONL):
 
@@ -491,7 +509,7 @@ flat-file hosts at polite rates; the ingest channel is locked." — or the obser
 Stage 2's transport. HTTP/2 <negotiated/not negotiated> on this host.
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add probes/transport_flatfile.py probes/results/ specs/bls-stats-stage1-findings.md
@@ -510,7 +528,7 @@ git commit -m "Probe flat-file hosts; record ingest-channel verdict"
 - Consumes: `_lib.make_client`, `_lib.probe(..., keep_body=True)`, `_lib.write_results`.
 - Produces: `probes/results/transport_api-<date>.jsonl`; findings section 2.
 
-- [ ] **Step 1: Write `probes/transport_api.py`**
+- [x] **Step 1: Write `probes/transport_api.py`**
 
 ```python
 # /// script
@@ -580,12 +598,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Syntax smoke check**
+- [x] **Step 2: Syntax smoke check**
 
 Run: `python3 -m py_compile probes/transport_api.py && echo compiles`
 Expected: `compiles`
 
-- [ ] **Step 3: Live run**
+- [x] **Step 3: Live run**
 
 Run: `uv run probes/transport_api.py` (`BLS_API_KEY` auto-loads from `.project.env` via `_lib`)
 Expected: `v1: http=200 api_status=REQUEST_SUCCEEDED datapoints=<n≥1> messages=[...]`, a
@@ -596,7 +614,12 @@ successful request is normal (v1 nags about registration) — that is exactly th
 demonstrated. If `success_by_payload` is false with http=200, record it verbatim: that is §7.1's
 trap observed live.
 
-- [ ] **Step 4: Record findings section 2**
+> Deviation: the run's signals all agreed (HTTP 200, `REQUEST_SUCCEEDED`, data present, empty
+> `message[]`), so §7.1's "200 is not success" trap was **not** witnessed; the rule is carried
+> forward as standing spec policy, unverified-by-probe. The registered v2 path *was* exercised
+> (key present in `.project.env`).
+
+- [x] **Step 4: Record findings section 2**
 
 Replace section 2's marker with:
 
@@ -618,7 +641,7 @@ inspection (`message[]` + per-series data), confirming §7.1's rule. Registered-
 item<, not yet done/; key on hand>.
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add probes/transport_api.py probes/results/ specs/bls-stats-stage1-findings.md
@@ -638,7 +661,7 @@ git commit -m "Probe BLS API surface; record structural-success finding"
 - Produces: `probes/results/transport_html-<date>.jsonl`; findings section 3 — the HTML ingest
   posture that decides whether Stage 2 builds transport for a headless `HtmlFetcher` backend.
 
-- [ ] **Step 1: Write `probes/transport_html.py`**
+- [x] **Step 1: Write `probes/transport_html.py`**
 
 ```python
 # /// script
@@ -697,12 +720,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Syntax smoke check**
+- [x] **Step 2: Syntax smoke check**
 
 Run: `python3 -m py_compile probes/transport_html.py && echo compiles`
 Expected: `compiles`
 
-- [ ] **Step 3: Live run**
+- [x] **Step 3: Live run**
 
 Run: `uv run probes/transport_html.py`
 Expected: the canary line (any status — it is a dated data point, 403 anticipated), six
@@ -711,7 +734,7 @@ here is issue 1 resolving to "headless mandatory", not a probe failure. A 200 wh
 `marker_found` is False is suspicious (a WAF challenge page can 200): inspect `body_head` in the
 JSONL before calling that surface passed, and record what the body actually was.
 
-- [ ] **Step 4: Record findings section 3**
+- [x] **Step 4: Record findings section 3**
 
 Replace section 3's marker with:
 
@@ -738,12 +761,17 @@ this is a WAF property observed on <date>; §18.3 forbids treating it as stable 
 re-checked whenever an HTML surface starts failing in operation.
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add probes/transport_html.py probes/results/ specs/bls-stats-stage1-findings.md
 git commit -m "Probe www.bls.gov HTML posture; record issue-1 verdict"
 ```
+
+> Deviation: resolved opposite to the plan's expectation — browser-shaped blocked 6/6, compliant
+> contact profile succeeded 6/6. A controller-authorized **addendum** beyond the plan's steps
+> added `probes/transport_html_contact.py` and a five-surface contact-profile run, because the
+> original run left §20 issue 1 unsettled (contact profile tested on only 1 of 6 surfaces).
 
 ---
 
@@ -758,7 +786,7 @@ git commit -m "Probe www.bls.gov HTML posture; record issue-1 verdict"
 - Produces: `probes/results/qcew_sizes-<date>.jsonl`; findings section 4 — the measured sizes
   Stage 5 designs the differ's memory envelope against.
 
-- [ ] **Step 1: Write `probes/qcew_sizes.py`**
+- [x] **Step 1: Write `probes/qcew_sizes.py`**
 
 ```python
 # /// script
@@ -859,12 +887,16 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Syntax smoke check**
+> Deviation: three defects were left verbatim during execution and fixed after the gate (commit
+> `78e6865`): the streaming GET now checks status and records it, cleanup is unconditional
+> (`try/finally`), and all records carry `probed_at`. The committed JSONL predates these changes.
+
+- [x] **Step 2: Syntax smoke check**
 
 Run: `python3 -m py_compile probes/qcew_sizes.py && echo compiles`
 Expected: `compiles`
 
-- [ ] **Step 3: Live run** (this is the stage's one bulk download — expect minutes, not seconds)
+- [x] **Step 3: Live run** (this is the stage's one bulk download — expect minutes, not seconds)
 
 Run: `uv run probes/qcew_sizes.py`
 Expected: one HEAD line per year 2019–2026 (the newest year may 404 before its first quarterly
@@ -873,7 +905,10 @@ line well under the 8 GB budget (the measurement itself streams; expect tens of 
 404s, follow the printed instruction (URL pattern correction — also fix Task 2's QCEW HEAD if not
 yet run) and re-run.
 
-- [ ] **Step 4: Record findings section 4**
+> Deviation: the measured artifact is a whole-**year** file (`2025.q1-q4.singlefile.csv`),
+> contradicting the spec's per-quarter premise; flagged for Stage 5.
+
+- [x] **Step 4: Record findings section 4**
 
 Replace section 4's marker with:
 
@@ -900,7 +935,7 @@ peak-RSS target → Stage 5's differ <may/must not> materialize full quarters an
 need> streaming joins. Diff cost is measured, not argued, at Stage 5 (roadmap).
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add probes/qcew_sizes.py probes/results/ specs/bls-stats-stage1-findings.md
@@ -927,7 +962,7 @@ git commit -m "Measure QCEW singlefile sizes; record issue-4 sizes"
 (see the plan-level list). If either is unavailable, stop and ask your human partner before
 starting this task.
 
-- [ ] **Step 1: Write `probes/objstore_capabilities.py`**
+- [x] **Step 1: Write `probes/objstore_capabilities.py`**
 
 ```python
 # /// script
@@ -1173,13 +1208,13 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Verify the env guard (offline, fast)**
+- [x] **Step 2: Verify the env guard (offline, fast)**
 
 Run: `env -u AWS_ENDPOINT_URL uv run probes/objstore_capabilities.py --context smoke`
 Expected: exits with `error: AWS_ENDPOINT_URL required (§1.4: the endpoint is configuration)` —
 no network touched.
 
-- [ ] **Step 3: Run against the development endpoint (local MinIO — see execution-time input 0)**
+- [x] **Step 3: Run against the development endpoint (local MinIO — see execution-time input 0)**
 
 Run — dev env is deliberately shell-sourced, not auto-loaded: this script stays env-pure so a
 deployment run can never silently inherit the dev endpoint from the file:
@@ -1204,6 +1239,8 @@ Run, with the deployment endpoint's env exported — in a fresh shell; do **not*
 Expected: as Step 3. This isolates endpoint capabilities from container networking, so a Step-5
 failure is attributable to the network path, not the endpoint.
 
+> Skipped: no deployment endpoint credentials and no container runtime available → deferred
+
 - [ ] **Step 5: Run from inside a deployment-side dev container (issue 14's actual question)**
 
 In a container shell (uv is expected in the image; else install per
@@ -1219,7 +1256,9 @@ Expected: the same checks; the final JSON matrix prints to stdout — copy it ba
 reports `unreachable`, that IS the issue-14 finding: record the failure class (DNS / TLS / route /
 auth) and stop for a topology decision with your human partner before Stage 2.
 
-- [ ] **Step 6: Record findings section 5**
+> Skipped: no deployment endpoint credentials and no container runtime available → deferred
+
+- [x] **Step 6: Record findings section 5**
 
 Replace section 5's marker with (one column per probed endpoint/context):
 
@@ -1252,7 +1291,7 @@ contended <only theoretically (single scheduled container)/in practice: why>.
 <if bypassed:> Stage 2 must provision a distinct non-admin runtime credential before first capture.
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add probes/objstore_capabilities.py probes/results/ specs/bls-stats-stage1-findings.md
@@ -1272,7 +1311,7 @@ git commit -m "Probe object-store capabilities from workstation and container"
 - Produces: findings sections 6–7 — the parameter sheet Stage 2's bucket-creation task executes
   verbatim, and the replication options list §20 issue 15 requires. No code.
 
-- [ ] **Step 1: Write findings section 6 (replication options)**
+- [x] **Step 1: Write findings section 6 (replication options)**
 
 Replace section 6's marker with the following, completing the "Available here?" column from
 Task 6's matrix and striking options the matrix rules out:
@@ -1298,7 +1337,7 @@ finding from day one, by choice.
 Recorded as pending until the plan-completion gate; `doctor` (Stage 7) verifies whichever lands.
 ```
 
-- [ ] **Step 2: Write findings section 7 (archive-bucket creation parameter sheet)**
+- [x] **Step 2: Write findings section 7 (archive-bucket creation parameter sheet)**
 
 Replace section 7's marker with the following, resolving the two `<from matrix>` fields from
 Task 6 and keeping everything else verbatim unless the matrix contradicts it (four-backtick
@@ -1353,14 +1392,20 @@ operational code path may be able to delete a vintage.
    (names propagate into Stage 2's config, nowhere else yet).
 ````
 
-- [ ] **Step 3: Consistency check against the matrix**
+> Deviation: the plan's verbatim "two independent layers" sentence was qualified, because the
+> delete-deny check returned NOT ENFORCED for the only credential tested. Also, several
+> substantive additions came from the final review: `attest/` added to the Contents row per spec
+> §9.2, the post-creation retention-inheritance gate, its failure/remediation branch (labeled
+> derived-not-demonstrated), and a stop-not-fallback clause for delete-deny.
+
+- [x] **Step 3: Consistency check against the matrix**
 
 Re-read findings section 5. Every `<from matrix>` field in sections 6–7 must now hold a concrete
 value; if the matrix shows object lock unsupported, section 7's lock row must carry the §17.4
 fallback ("delete-deny alone + recorded gap") as the *actual* parameter, not a footnote.
 Expected: no unresolved `<from matrix>` markers remain (`grep -n "from matrix" specs/bls-stats-stage1-findings.md` returns nothing).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add specs/bls-stats-stage1-findings.md
@@ -1379,7 +1424,7 @@ git commit -m "Record replication options and archive-bucket creation parameters
 - Consumes: findings sections 1–7 complete; the roadmap's Stage 1 exit criteria.
 - Produces: the stage's completion evidence; the ticked roadmap entry with its completion stamp.
 
-- [ ] **Step 1: Audit findings against the stage exit criteria**
+- [x] **Step 1: Audit findings against the stage exit criteria**
 
 Check each line; fix gaps in the findings document now (re-running a probe if a result is missing
 or undated), not later:
@@ -1395,7 +1440,7 @@ or undated), not later:
   the operator if any cleanup line reported failure).
 - Every section cites script + results file + date.
 
-- [ ] **Step 2: Write findings section 8 (consequences for later stages)**
+- [x] **Step 2: Write findings section 8 (consequences for later stages)**
 
 Replace section 8's marker with a short list derived from the actual results — at minimum, one
 line each on:
@@ -1414,7 +1459,7 @@ line each on:
   the roadmap's assumptions">.
 ```
 
-- [ ] **Step 3: Tick the roadmap**
+- [x] **Step 3: Tick the roadmap**
 
 In `specs/bls-stats-spec-roadmap.md`, change the Stage 1 entry's `- [ ]` to `- [x]` and append,
 indented under the stage entry, after its `ROUTING: writing-plans` line:
@@ -1426,7 +1471,11 @@ indented under the stage entry, after its `ROUTING: writing-plans` line:
       Next: resume the roadmap.
 ```
 
-- [ ] **Step 4: Commit**
+> Deviation: the roadmap entry was stamped `COMPLETE WITH ONE OPEN ITEM (2026-08-10)` rather than
+> the plan's canonical `COMPLETE (<date>)`, because §20 issue 14 did not close. This departs from
+> the roadmap's own stamp convention.
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add specs/bls-stats-stage1-findings.md specs/bls-stats-spec-roadmap.md
