@@ -1086,13 +1086,18 @@ the Stage-2 note above it) — no positive enforcement evidence for the deny-pol
 for any credential. Admin governance-bypass remains the deliberate break-glass. P1's protection
 target is the *runtime* path — no operational code path may be able to delete a vintage.
 
-**Decisions required (operator):**
-1. Lock mode + duration: GOVERNANCE/3650d recommended above — confirm or override.
-2. Final bucket names: `bls-stats-raw` / `bls-stats-main` are the defaults — confirm or rename
-   (names propagate into Stage 2's config, nowhere else yet).
+**Decisions (operator):**
+1. Lock mode + duration: GOVERNANCE/3650d recommended above — **confirmed by the
+   operator, 2026-08-11.**
+2. Final bucket names: `bls-stats-raw` / `bls-stats-main` are the defaults — **confirmed
+   by the operator, 2026-08-11** (names propagate into Stage 2's config, nowhere else
+   yet).
 
-Both recorded as pending operator sign-off until the plan-completion gate, same as section 6's
-mechanism decision; Stage 2 executes this sheet only once both are confirmed.
+Both confirmed 2026-08-11; the reasoning recorded above for each stands as the record of
+why. Stage 2 executes this sheet using these parameters. **Section 6's replication
+mechanism decision is separate and remains pending** — it is conditional on the
+deployment endpoint's replication API (§20 issue 14, unprobed), and is not resolved by
+this sign-off.
 
 ## 8. Consequences for later stages (Task 8)
 
