@@ -751,8 +751,11 @@ Recorded as pending until the plan-completion gate; `doctor` (Stage 7) verifies 
 
 ## 7. Archive-bucket creation parameters — §7.3, §17.4 (Task 7)
 
-Written **before any bucket exists**: object-lock retention is settable only at bucket
-creation (§7.3) — "the one storage decision that cannot be corrected later."
+Written **before any bucket exists**: object-lock *enablement* (`ObjectLockEnabledForBucket=true`)
+is settable only at bucket creation (§7.3) — a bucket created without it can never have object
+lock retrofitted. Default retention itself is a separate call issued after creation (see the
+Object lock row and the required post-creation verification gate below); this sheet still has to
+be right before Stage 2 creates anything, because enablement is the one-shot decision.
 
 Executed by Stage 2 **before the first capture**. §7.3: "the archive bucket must be created with
 immutability configured before the first byte lands … the one storage decision that cannot be
@@ -764,13 +767,49 @@ objects):
 | Parameter | raw bucket `bls-stats-raw` | main bucket `bls-stats-main` |
 |---|---|---|
 | Contents | `raw/` only | `log/`, `ledger/`, `store/`, `ops/` |
-| Created | Stage 2, with every row below applied at creation | Stage 2 |
-| Versioning | Enabled — **dev endpoint (2026-08-10 probe):** `versioning` check: "status=Enabled, versions_after_two_puts=2". Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet; a §17.4 hard requirement must not rest on dev-endpoint evidence alone at execution time. | Enabled (same caveat) |
-| Object lock | `ObjectLockEnabledForBucket=true`; default retention **GOVERNANCE, 3650 days** (a mode *and* a duration — §17.4) | Off — §17.4 generation-swap GC must delete `gen=<n>/` |
-| Endpoint supports lock? | **dev endpoint (2026-08-10 probe): yes**, on every relevant check — `object_lock.create_enabled`: "Enabled"; `object_lock.default_retention_with_duration`: "default retention GOVERNANCE/3650d accepted (a *duration* — §17.4)"; `object_lock.put_retention` (per-object GOVERNANCE retention, the mechanism delete-denial depends on — no row in finding 5's table, JSON-only): "GOVERNANCE +90s on version d73a3374-e800-4092-a820-2c57bc31269a"; `object_lock.delete_denied`: "enforced (`InvalidRequest`)". **Caveat:** the probe labels *any* `ClientError` on the delete attempt as "enforced," and the code actually observed, `InvalidRequest`, is not an access-denial-specific code — so "locked-version delete denied" rests on weaker evidence than the label suggests. **This is dev-endpoint evidence only. Deployment endpoint: unprobed** (§20 issue 14, blocked on missing deployment credentials) — **re-verify against the deployment endpoint before Stage 2 executes this sheet**; a dev-endpoint capability must not be promoted to a deployment guarantee (§1.4). If the deployment endpoint turns out not to support object lock, §17.4's fallback becomes the *actual* parameter here: delete-deny alone, with the gap recorded as a standing finding at Stage 7. | — |
+| Created | Stage 2 — only `ObjectLockEnabledForBucket` (Object lock row) is part of the `CreateBucket` call itself; versioning, default retention, the delete-deny policy, and lifecycle are each separate calls issued immediately afterward, in this sheet's row order (see the Object lock row and the required post-creation verification gate below) | Stage 2 |
+| Versioning | Enabled — **dev endpoint (2026-08-10 probe):** `versioning` check: "status=Enabled, versions_after_two_puts=2". Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet; a §17.4 hard requirement must not rest on dev-endpoint evidence alone at execution time. **Unlike the Object lock row, there is no fallback here: if re-verification shows the deployment endpoint doesn't support versioning, that is a stop, not a fallback** — conditional-PUT dedup, per-version `PutObjectRetention`, and compaction all assume versioning is on, and this sheet does not proceed to bucket creation until it is confirmed. | Enabled (same caveat) |
+| Object lock | Two separate calls, not one: (1) `ObjectLockEnabledForBucket=true`, part of `CreateBucket` itself — creation-only, cannot be added to an existing bucket; (2) immediately afterward, a distinct `PutObjectLockConfiguration` call setting default retention **GOVERNANCE, 3650 days** (a mode *and* a duration — §17.4). **Required gate before first capture:** see "Post-creation verification" immediately below this table — this row is not satisfied until that gate passes. | Off — §17.4 generation-swap GC must delete `gen=<n>/` |
+| Endpoint supports lock? | **dev endpoint (2026-08-10 probe): yes**, on every check the probe script runs — `object_lock.create_enabled`: "Enabled"; `object_lock.default_retention_with_duration`: "default retention GOVERNANCE/3650d accepted (a *duration* — §17.4)"; `object_lock.put_retention` (per-object GOVERNANCE retention, the mechanism delete-denial depends on — no row in finding 5's table, JSON-only): "GOVERNANCE +90s on version d73a3374-e800-4092-a820-2c57bc31269a"; `object_lock.delete_denied`: "enforced (`InvalidRequest`)". **Caveat:** the probe labels *any* `ClientError` on the delete attempt as "enforced," and the code actually observed, `InvalidRequest`, is not an access-denial-specific code — so "locked-version delete denied" rests on weaker evidence than the label suggests. **None of these checks cover inheritance** — a new object automatically acquiring the bucket's *default* retention, rather than having retention set explicitly per object. `object_lock.put_retention`/`object_lock.delete_denied` (`probes/objstore_capabilities.py`, functions `lock_retention` then `lock_delete_denied`) set retention *explicitly* on that object, before `object_lock.default_retention_with_duration` (`lock_default_retention`) ever configures the bucket default, and no object is written after the default is configured. That link is untested by this run; it is exactly what the required post-creation verification gate below closes. **This is dev-endpoint evidence only. Deployment endpoint: unprobed** (§20 issue 14, blocked on missing deployment credentials) — **re-verify against the deployment endpoint before Stage 2 executes this sheet**; a dev-endpoint capability must not be promoted to a deployment guarantee (§1.4). Re-verifying the checks above at the deployment endpoint does not by itself close the inheritance gap either — the post-creation gate below must still run there. If the deployment endpoint turns out not to support object lock, §17.4's fallback becomes the *actual* parameter here: delete-deny alone — in that branch, delete-deny is the *sole* protection layer against the runtime credential, so it must be positively verified for the actual non-admin runtime credential (§17.4) before relying on it; the only evidence on record today is NOT ENFORCED, for the root credential only (see the Delete policy row below) — with the gap recorded as a standing finding at Stage 7. | — |
 | Delete policy | Deny `s3:DeleteObject` + `s3:DeleteObjectVersion` to `"AWS": "*"` on `arn:aws:s3:::bls-stats-raw/*` (JSON below); enforced for the runtime credential — **dev endpoint (2026-08-10 probe):** `delete_deny_policy` check: "NOT ENFORCED for this credential (admin/root bypasses bucket policy?) — Stage 2 needs a distinct runtime credential." The credential probed was MinIO's root/admin credential, and it bypassed its own bucket policy. **Stage 2 must provision a distinct non-admin runtime credential before first capture and re-run this check against that credential** — the root-credential result neither confirms nor denies enforcement for any other principal. Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet. | runtime credential MAY delete (generation GC) |
 | Lifecycle | **None. `raw/` never expires; no tiering** (§17.4, §1.4) | none initially |
 | Region / endpoint | as configured (`AWS_ENDPOINT_URL` — §1.4: never a constant) | same |
+
+**Post-creation verification (required gate — first capture must not proceed if this fails).**
+The object-lock checks in the table above establish that the endpoint accepts lock enablement and
+an explicit per-object retention, and enforces delete-denial on a version retained that way — they
+do not establish that a new object dropped into the bucket *without* an explicit
+`PutObjectRetention` call actually inherits the bucket's default retention. That inheritance link
+is the one the capture path depends on: Stage 2's capture writer is nowhere specified to call
+`PutObjectRetention` per object, so immutability rests entirely on inheritance. No probe run in
+this stage tested it — `objstore_capabilities.py`'s `lock_retention`/`lock_delete_denied` checks
+(`probes/objstore_capabilities.py`) set retention *explicitly*, before the bucket default even
+existed, and `lock_default_retention` never writes an object afterward to confirm what a plain PUT
+would inherit. Re-running that same probe against the deployment endpoint does not close this gap
+either — the script still never writes an object after configuring the default.
+
+Before Stage 2's capture loop writes its first real object, run this sequence against
+`bls-stats-raw` and treat a failure as a stop, not a warning:
+
+1. After creating the bucket with `ObjectLockEnabledForBucket=true` and issuing the
+   `PutObjectLockConfiguration` call for default retention GOVERNANCE/3650d, call
+   `GetObjectLockConfiguration` and assert it returns `ObjectLockEnabled=Enabled` with
+   `Rule.DefaultRetention = {Mode: GOVERNANCE, Days: 3650}`.
+2. `PutObject` one throwaway object under a clearly marked key inside the bucket's declared
+   `raw/` prefix (e.g. `raw/_verify/lock-inherit-check` — the Contents row above says `raw/`
+   only, so the verification artifact must live inside it too) — **with no `Retention` argument
+   on the PUT** — so it can only pick up retention by inheritance, not by an explicit call.
+3. Call `GetObjectRetention` on that object's version and assert `Mode=GOVERNANCE` and that
+   `RetainUntilDate` is ~3650 days out (use a tolerance window, e.g. ±1 day, rather than an exact
+   timestamp — the server computes the date, this sheet does not).
+4. If either assertion fails, **first capture does not proceed** — inheritance is not confirmed at
+   this endpoint, and the parameter sheet's central claim (new objects are protected automatically)
+   does not hold.
+
+Note for whoever runs this: step 2's object is written under real GOVERNANCE/3650d retention in
+the real raw bucket — once written, it is immutable for the full duration absent an admin
+governance-bypass delete. Key it as an explicit verification artifact, not operational data, since
+it cannot simply be deleted afterward.
 
 Delete-deny policy for the raw bucket, verbatim:
 
@@ -789,19 +828,30 @@ Delete-deny policy for the raw bucket, verbatim:
 }
 ```
 
+**Stage-2 note (delete-deny re-run scope — not a fix here; `probes/objstore_capabilities.py` is
+pinned for this stage).** The `delete_deny_policy` check's delete attempt
+(`probes/objstore_capabilities.py`, function `delete_deny`) calls `delete_object` on the `plain`
+bucket without a `VersionId`, and that same bucket had versioning enabled earlier in the same run
+(the `versioning` check runs against `plain` too). An unversioned delete call against a versioned
+bucket creates a delete marker rather than removing a version — it exercises `s3:DeleteObject`
+only, never `s3:DeleteObjectVersion`. The result recorded (NOT ENFORCED) is negative, so this gap
+errs safe: it under-tested rather than over-reported enforcement. But it means the deny policy's
+coverage of an actual version-delete attempt is untested. When Stage 2 re-runs this check against
+the provisioned non-admin runtime credential (Delete policy row above), the re-run should cover
+**both** actions — a delete-marker attempt (no `VersionId`) and a versioned-delete attempt
+(`VersionId` set to a real version) — before treating the deny policy as confirmed for that
+credential.
+
 **Why GOVERNANCE and not COMPLIANCE (recommendation):** COMPLIANCE retention cannot be shortened
 by anyone, including the account root — a mis-set duration is permanently unfixable, and the 2025
 lesson cuts both ways (irreversibility is the point *and* the risk). GOVERNANCE + the delete-deny
-policy gives two independent layers against the runtime credential, with admin
-governance-bypass as deliberate break-glass. P1's protection target is the *runtime* path — no
-operational code path may be able to delete a vintage.
-
-**Related context (credential hygiene, not a leak):** the dev MinIO root credential's access key
-ID is the same string as this project's published contact address (`probes/_lib.py`'s
-User-Agent contact fallback). An access key ID is a username, not a secret, and the secret key
-itself is clean — unrelated to that string, and it stays in `.project.env`, git-ignored per the
-Global Constraints — but it means that root identity is effectively public, which strengthens
-(does not by itself create) the non-admin-runtime-credential requirement stated above.
+policy gives two independent layers against the runtime credential **once the non-admin runtime
+credential is verified against the deny policy — unverified as of 2026-08-10.** The only evidence
+on record this stage is the `delete_deny_policy` check: NOT ENFORCED, and that result is for the
+root credential, the only credential and only endpoint tested (see the Delete policy row above and
+the Stage-2 note above it) — no positive enforcement evidence for the deny-policy layer exists yet
+for any credential. Admin governance-bypass remains the deliberate break-glass. P1's protection
+target is the *runtime* path — no operational code path may be able to delete a vintage.
 
 **Decisions required (operator):**
 1. Lock mode + duration: GOVERNANCE/3650d recommended above — confirm or override.
