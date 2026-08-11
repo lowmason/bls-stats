@@ -943,8 +943,19 @@ for this same bucket. `DeleteBucket` fails with `BucketNotEmpty` while any versi
 remains, so "delete it, then `DeleteBucket`" is not sufficient in any branch below; every branch
 must list and remove **every version and every delete marker** of the throwaway object (the same
 pattern `probes/objstore_capabilities.py`'s own cleanup step uses on its throwaway probe buckets —
-section 5 above) before the bucket is actually empty. The operator is left holding a bucket that may
-also contain a retained object, and recovery differs by exactly which assertion failed:
+section 5 above) before the bucket is actually empty. A second constraint stacks on top of the
+first: per the Created row above, the delete-deny policy is applied "in this sheet's row order" —
+before Lifecycle but after Object lock and its retention call — so by the time this gate runs (a
+check gating *first capture*, which comes after all of Created's setup calls), the bucket policy
+denying `s3:DeleteObject`/`s3:DeleteObjectVersion` to `"AWS": ["*"]` is already attached and denies
+those same version-delete and delete-marker calls to *every* principal, including whoever is running
+this remediation. **Every branch below therefore needs the same first step this section's
+break-glass paragraph already describes: remove or suspend the bucket policy before attempting any
+delete, then reattach it (or apply it fresh to the replacement bucket) once teardown and recreation
+are done** — this applies regardless of whether an object ended up retained, since the policy blocks
+plain version deletes just as much as governance-bypassed ones. The operator is left holding a
+bucket that may also contain a retained object, and recovery differs by exactly which assertion
+failed:
 
 - **Step 1's assertion fails** (`GetObjectLockConfiguration` doesn't return
   `GOVERNANCE`/`3650`) — check whether step 2 still ran. If the throwaway object's
