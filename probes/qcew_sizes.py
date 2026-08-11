@@ -11,6 +11,7 @@ bucket exists yet, by design (§7.3) — and the scratch file is deleted. Diff C
 is measured at Stage 5 (roadmap, issue 4).
 """
 import argparse
+import datetime as dt
 import resource
 import sys
 import tempfile
@@ -21,6 +22,11 @@ from _lib import make_client, probe, write_results
 
 URL = "https://data.bls.gov/cew/data/files/{year}/csv/{year}_qtrly_singlefile.zip"
 YEARS = range(2019, 2027)
+
+
+def _probed_at() -> str:
+    """Matches the timestamp format _lib.probe() already uses."""
+    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
 
 
 def peak_rss_bytes() -> int:
@@ -43,6 +49,15 @@ def measure_zip(path: Path) -> list[dict]:
                 "lines": n_lines,
             })
     return rows
+
+
+def measure_then_delete(dest: Path) -> list[dict]:
+    """measure_zip(dest), then remove the scratch file — unconditionally, even if
+    measurement raises, so a failure never strands the ~287 MB download."""
+    try:
+        return measure_zip(dest)
+    finally:
+        dest.unlink()
 
 
 def main() -> None:
@@ -72,17 +87,27 @@ def main() -> None:
         url = URL.format(year=newest)
         dest = args.dest / f"qcew_{newest}_qtrly_singlefile.zip"
         print(f"downloading {url} -> {dest} (streaming, 1 MiB chunks)")
-        n = 0
-        with client.stream("GET", url) as r, dest.open("wb") as f:
-            for chunk in r.iter_bytes(1 << 20):
-                f.write(chunk)
-                n += len(chunk)
-        records.append({"downloaded": url, "bytes_on_disk": n})
+        with client.stream("GET", url) as r:
+            r.raise_for_status()  # fail loudly before any bytes are written to disk
+            download_rec = {
+                "probed_at": _probed_at(),
+                "downloaded": url,
+                "status": r.status_code,
+                "http_version": r.http_version,
+            }
+            if (clen := r.headers.get("content-length")) is not None:
+                download_rec["content_length"] = clen
+            n = 0
+            with dest.open("wb") as f:
+                for chunk in r.iter_bytes(1 << 20):
+                    f.write(chunk)
+                    n += len(chunk)
+        download_rec["bytes_on_disk"] = n
+        records.append(download_rec)
 
-    members = measure_zip(dest)
-    records.extend({"year": newest} | m for m in members)
-    records.append({"peak_rss_bytes": peak_rss_bytes()})
-    dest.unlink()
+    members = measure_then_delete(dest)
+    records.extend({"probed_at": _probed_at(), "year": newest} | m for m in members)
+    records.append({"probed_at": _probed_at(), "peak_rss_bytes": peak_rss_bytes()})
 
     out = write_results("qcew_sizes", records)
     print(f"\nresults: {out}")
