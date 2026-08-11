@@ -718,30 +718,48 @@ profiles:
 |---|---|---|
 | `flatfile` | `download.bls.gov`, `data.bls.gov` | Primary ingest. HTTP/2, connection reuse, descriptive contact User-Agent — **mandatory from the first request, not a courtesy: the flat-file host 403s bare user agents, and BLS policy permits real-time blocking of non-compliant robots (R12)**. Conservative concurrency (≤4). Streaming downloads. |
 | `api` | `api.bls.gov` | Spot checks only. **Never trust HTTP 200 or `REQUEST_SUCCEEDED`** — inspect the `message` array and per-series data presence. Key expires annually; alert on auth messages. |
-| `html` | `www.bls.gov` | Known to 403 ordinary fetchers. Full browser-shaped headers, HTTP/2, low rate. **Pluggable backend** (§7.2). |
+| `html` | `www.bls.gov` | **The same descriptive contact User-Agent as `flatfile`**, HTTP/2, low rate — measured working on six surfaces (2026-08-10, `specs/bls-stats-stage1-findings.md` §3). **Browser-shaped headers are blocked**, uniformly, on the same six: do not send them (§7.2). **Pluggable backend** (§7.2), unbuilt while the contact profile passes. |
 
 All profiles: `tenacity` retry with jitter on 5xx/429/timeout, no retry on 4xx except 403/429,
 per-host token bucket, and every request — including failures — appended to `fetch_log`.
 
 ### 7.2 The 403 problem
 
-`www.bls.gov` returns 403 to plain `httpx` even with a contact User-Agent per BLS's stated policy
-(review §0.3). The design does not pretend otherwise. Mitigations, in order, and the last one is the
-real one:
+`www.bls.gov` 403s *some* fetcher shapes and not others, and this section's earlier reading of which
+is which was **inverted by measurement** (2026-08-10, `specs/bls-stats-stage1-findings.md` §3): the
+browser-shaped profile was blocked on all six probed surfaces with a uniform Akamai block page,
+while the plain contact-UA profile returned genuine content on all six. The mechanism is untested —
+five headers differ at once and no run interleaved the two profiles (deferred item 5) — so what
+follows is an ordering by *observed outcome*, not by explanation. Every rung is point-in-time
+evidence about a third party's WAF (§18.3); re-verify rather than assume.
+
+Mitigations, in order:
 
 1. **Prefer non-HTML surfaces.** The `.ics` schedule feed and the Atom release feeds cover most of
    what the schedule pages carry.
-2. **Browser-shaped `httpx`** — realistic UA, `Accept`, `Accept-Language`, `Accept-Encoding`,
-   HTTP/2 enabled, keep-alive. This defeats naive filters; it may not defeat TLS-fingerprint ones.
-3. **Pluggable `HtmlFetcher` backend.** If (2) fails, a headless-browser fetcher runs as a separate,
-   low-frequency worker. Results are cached to the object store keyed by `(url, date)`, so the hot path reads
-   the cache, not the live site. Errata and schedule pages change daily at most; a browser fetch a few
-   times a day is entirely adequate.
-4. **Wayback Machine** as a secondary source for the *archived* news-release indexes — genuinely
+2. **Contact-UA `httpx`** — the same descriptive, contactable User-Agent §7.1 makes mandatory on
+   the flat-file host, `Accept: */*`, `Accept-Encoding: gzip`, HTTP/2, low rate, no
+   browser-imitating headers. **This is the measured-working profile and the one to build.**
+3. **Browser-shaped `httpx`** — realistic UA, `Accept`, `Accept-Language`, `Accept-Encoding`,
+   HTTP/2, keep-alive. Retained as a recorded rung, **not** as the fallback to reach for: it is the
+   configuration measured blocked. A request claiming Chrome while sending none of `sec-ch-ua` or
+   `Sec-Fetch-*` is internally inconsistent on its face, which may be what the WAF keys on.
+4. **Pluggable `HtmlFetcher` backend.** A headless-browser fetcher as a separate, low-frequency
+   worker, with results cached to the object store keyed by `(url, date)` so the hot path reads the
+   cache, not the live site. **Left unbuilt while (2) passes** — the interface stays pluggable so
+   this rung can be built without touching callers.
+5. **Wayback Machine** as a secondary source for the *archived* news-release indexes — genuinely
    useful for §11.3 backfill regardless of the 403 question.
-5. **Degradation is designed in (P9).** If all HTML fetching fails, the system loses scheduled
+6. **Degradation is designed in (P9).** If all HTML fetching fails, the system loses scheduled
    times, errata pre-arming, and EP. It does not lose flat-file ingest. Every HTML-derived field is
    nullable and every code path that reads one has a defined behavior when it is null.
+
+⚠ **Robots clearance is per-path, not per-host.** `www.bls.gov/robots.txt`'s generic
+`User-agent: *` block disallows `/scripts`, `/crs`, `/_private`, `/iisadmin`, `/srchadm`,
+`/advisory/members/`, `/idcf`, `/*print*` (2026-08-10). The six probed paths are clear; any
+*additional* `html` path — the archived news-release index (§11.3), per-release archive links, a
+per-program notices page (§12.5) — must be checked against a re-fetched policy before it is
+fetched (R12).
 
 ### 7.3 The archive
 
