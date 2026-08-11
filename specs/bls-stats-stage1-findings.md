@@ -21,6 +21,7 @@ before anything else is built."
 | HEAD second prefix (`jt`) | 200; `Last-Modified: Tue, 04 Aug 2026 14:00:00 GMT`; `ETag: "0f0e8a1924dd1:0"`; `Content-Length: 34414209` |
 | HEAD QCEW singlefile zip (`data.bls.gov`) | 200; `Content-Length: 304826526` (~291 MiB); `Last-Modified: Tue, 02 Sep 2025 11:29:43 GMT`; `ETag: "122b489e-63dcfcdf704e5"`. The 2024 `data.bls.gov/cew/data/files/2024/csv/2024_qtrly_singlefile.zip` URL pattern is confirmed live — no correction needed for Task 5. |
 | Ranged GET (`bytes=0-1023`) | 206 — honored. `Content-Range: bytes 0-1023/47300620`; `content-type: text/plain`; `Content-Encoding: gzip`; `Vary: Accept-Encoding`. Same URL, same `ETag: "094a5766826dd1:0"`, and same `Last-Modified` as the plain HEAD above, but that HEAD reported `Content-Length: 350208884` and `content-type: application/octet-stream` — the total and the content-type diverge on an identical validator. See Consequences for what this does and doesn't establish. |
+| `Accept-Ranges` (advertised range support) | `bytes` on all four `download.bls.gov` data-bearing responses in this table (JSONL lines 2, 3, 4, 6) and on the QCEW singlefile HEAD on `data.bls.gov` (JSONL line 5) — absent on the `download.bls.gov` 404 (JSONL line 1). This is *advertised* support only, read off the response header; it is weaker than the 206 actually demonstrated on `download.bls.gov` by the Ranged GET row above. This run never issued a ranged GET against `data.bls.gov` (§4's envelope arithmetic notes the same gap), so `data.bls.gov`'s range support is advertised here, not demonstrated — do not upgrade the two to the same evidentiary strength. |
 | HTTP version negotiated | h2 (HTTP/2) on every one of the six requests, on both `download.bls.gov` and `data.bls.gov` |
 | Content-Encoding under pinned `Accept-Encoding: gzip` | `gzip` on two flat-file GETs: `ce.period` (JSONL line 3) and ranged CES (JSONL line 6), both with `Vary: Accept-Encoding`. Absent on the 404 page (JSONL line 1: 1245 bytes, uncompressed). HEAD responses omit `Content-Encoding` (no body sent). QCEW `.zip` probed only via HEAD (JSONL line 5); HEAD omits body headers by protocol, so no conclusion on transfer encoding. Task 5's full-file download will measure on-wire bytes and settle any double-compression question. |
 
@@ -162,9 +163,14 @@ whole HTML ingest posture" — browser-shaped `httpx` sufficient, or headless ma
 **Probe:** `probes/transport_html.py`, run 2026-08-10
 (`probes/results/transport_html-2026-08-10.jsonl`).
 
-Canary (compliant contact UA, one request): 200 — **updates** the review-§0.3 baseline.
-Review §0.3 (cited at spec §7.2: "`www.bls.gov` returns 403 to plain `httpx` even with a
-contact User-Agent") predicts 403 for exactly this shape of request. JSONL line 1 shows
+Canary (compliant contact UA, one request): 200 — **updates** the baseline stated at
+`specs/bls-stats-spec.md` line 728: "`www.bls.gov` returns 403 to plain `httpx` even with a
+contact User-Agent per BLS's stated policy (review §0.3)." That line's own parenthetical
+citation does not resolve in-repo — `specs/bls-stats-spec-review.md` has no §0.3 (its
+headings are TL;DR / Key Findings / Details (1)-(4) / Recommendations / Caveats), the same
+class of unresolved cross-reference section 2 already flags for §7.1's HTTP-vs-payload
+rule. The pointer used below is therefore the spec line itself, not the review section it
+names. That spec line predicts 403 for exactly this shape of request. JSONL line 1 shows
 none: HTTP/2 200, no `server: AkamaiGHost` header (no Akamai *block-page* signature — this
 does not by itself prove the request bypassed Akamai's edge entirely, only that it did not
 receive an Akamai-generated block page), `content-length: 84713` on the wire
@@ -198,7 +204,7 @@ as alternative explanations; this run cannot distinguish between them. Either wa
 one request, to one URL, on one date — it does not establish that the compliant contact UA
 passes every `www.bls.gov` path, and per this task's non-negotiable rule it was not
 repeated or extended to other surfaces to check. It is recorded here as exactly what it
-is: a single dated data point that contradicts the review-§0.3 baseline at this one URL,
+is: a single dated data point that contradicts the spec §7.2 baseline (line 728) at this one URL,
 and that undercuts the premise §7.2's mitigation ordering itself was built on (see
 Verdict).
 
@@ -211,9 +217,13 @@ Verdict).
 | news-release index | 403 | **True** (false positive) | Blocked, same false-positive marker mechanism as errata table. |
 | schedule index | 403 | **True** (false positive) | Blocked, same false-positive marker mechanism as errata table. |
 
-All six browser-shaped requests returned byte-identical 1323-byte bodies with
-`server: AkamaiGHost` — a single, uniform Akamai bot-management block, not per-surface
-variation. Three of the six (errata table, news-release index, schedule index) show
+All six browser-shaped requests returned bodies identical in both recorded respects: the
+same `body_bytes` length (1,323) and the same first 500 recorded bytes (`body_head`,
+byte-for-byte across all six) — not literally "byte-identical" in full, since `keep_body`
+was not set for this probe and bytes 500–1,323 were never captured or compared. What this
+run establishes is length-identity plus prefix-identity; full-body identity is consistent
+with the data but not itself observed. Combined with `server: AkamaiGHost` on all six, this
+reads as a single, uniform Akamai bot-management block, not per-surface variation. Three of the six (errata table, news-release index, schedule index) show
 `marker_found: True` only because the pinned `<html` marker is weak enough that an Akamai
 challenge page satisfies it trivially; this run's overall verdict is unaffected because
 the script's `blocked` predicate requires `status == 200` first, and none of the six
@@ -241,18 +251,26 @@ the canary paragraph and the errata-table table row above). The mechanical line 
 answers "did mitigation-2-as-configured pass" (no, on all six); it is not designed to
 answer, and does not answer, "is mitigation-3 the correct engineering response" — that
 second question is exactly what a same-URL contact-UA pass undercuts. §7.2's own ordering
-was built on review §0.3's premise that plain/contact-UA `httpx` also 403s
+was built on the line-728 premise (above) that plain/contact-UA `httpx` also 403s
 `www.bls.gov` — this run's canary contradicts that premise at one path, which weakens the
 case for jumping straight to the *last* rung of the ladder without first testing a much
 cheaper one.
 
-**Recommended before Stage 2 commits to building the headless worker:** a single,
-separate follow-up probe — one contact-UA GET per remaining surface (5 requests, same
-2 s spacing, same one-shot discipline as this task) — to see whether the compliant
-contact UA that passed `/errata/` today also passes robots.txt, the `.ics` feed, the Atom
-feed, the news-release index, and the schedule index. If it does, §7.2's ladder may stop
-at "use the contact-UA profile for `html` surfaces too" rather than at headless — a
-substantially cheaper Stage 2 outcome than standing up and operating a browser-automation
+**Recommended before Stage 2 commits to building the headless worker:** *Superseded: the
+follow-up probe recommended in this paragraph is exactly what the addendum below
+(`probes/transport_html_contact.py`) executes — see "Addendum — contact-profile pass over
+the remaining five surfaces" further down this section for its results, and "Verdict
+(issue 1) — revised after this addendum" for what they settle. This paragraph is left as
+run, not deleted, per this task's chronological-record convention; do not re-run this
+follow-up as an open item. The addendum's own live recommendation — the question it still
+leaves open — is the same-session **interleaved-profile** probe described in "Confound 2
+(sequence position) — direct read" below, not a repeat of this paragraph's 5-request
+plan.* a single, separate follow-up probe — one contact-UA GET per remaining surface (5
+requests, same 2 s spacing, same one-shot discipline as this task) — to see whether the
+compliant contact UA that passed `/errata/` today also passes robots.txt, the `.ics` feed,
+the Atom feed, the news-release index, and the schedule index. If it does, §7.2's ladder
+may stop at "use the contact-UA profile for `html` surfaces too" rather than at headless —
+a substantially cheaper Stage 2 outcome than standing up and operating a browser-automation
 worker. If it does not, the case for mitigation 3 becomes solid rather than assumed.
 Pending that follow-up, this run's only unqualified, decisive finding is that
 **mitigation 2 as currently configured is not sufficient anywhere it was tried**; whether
@@ -426,6 +444,33 @@ Chrome's) is not ruled out by this data — but it is untested by either run, ex
 rest of this correction says, and no claim about what *did* cause the blocks follows from
 noting it.
 
+**Safety check — no lasting IP block observed (R12).** `_lib.BROWSER_HEADERS`'s
+User-Agent carries no contact address, and this task's design mandated using it anyway
+(§7.2 mitigation 2 has to be tried as specified to be ruled out) — tripping Akamai
+bot-management 6/6 on `www.bls.gov` is a designed-in consequence, not a defect. But R12
+warns that a blocked IP can forfeit Stage 2's capture, so whether that trip left a lasting
+block is itself a finding, not a formality, and the timestamps across this stage's runs
+settle it as far as they go: the six 403s above ran 22:22:38–22:22:48 UTC
+(`transport_html-2026-08-10.jsonl`, lines 2-7). The contact profile then got clean HTTP
+200s **on the same host**, `www.bls.gov`, roughly fifteen minutes later, at
+22:37:53–22:38:01 UTC (`transport_html_contact-2026-08-10.jsonl`, all five records — the
+addendum's own results above). Separately, `data.bls.gov` — a different host, never
+blocked — ran eight sequential HEADs at 23:05:58–23:06:13 UTC
+(`qcew_sizes-2026-08-10.jsonl`), seven 200s for 2019–2025 and one 404 for 2026 (a
+resource-not-found, not a block; §4), immediately followed in the same script run by the
+single streaming GET of the 287,026,419-byte 2025 singlefile zip (no separate timestamp is
+recorded for the GET itself in the JSONL, but it runs immediately after the HEAD sequence,
+per `probes/qcew_sizes.py`'s own control flow). So: deliberately tripping Akamai
+bot-management on `www.bls.gov` on 2026-08-10 produced no lasting block observable on
+either host tested afterward — `www.bls.gov` itself (contact profile, ~15 min later) or
+`data.bls.gov` (a different host, ~43 min later). Scoped honestly, not further: no
+post-block datum exists for `download.bls.gov` or `api.bls.gov` — both were probed
+**earlier** in the session, before the 22:22:38 block (`download.bls.gov`:
+21:28:18–21:28:28 UTC, `transport_flatfile-2026-08-10.jsonl`; `api.bls.gov`:
+21:56:22–21:56:24 UTC, `transport_api-2026-08-10.jsonl`), so this run says nothing about
+whether either of those hosts would show a lasting block, only that `www.bls.gov` and
+`data.bls.gov` did not.
+
 **Verdict (issue 1) — revised after this addendum.** The verdict recorded above answered
 one question decisively — mitigation 2, as currently configured, fails on every surface
 tried — and left a second question open: whether mitigation 3 (headless) is the necessary
@@ -586,11 +631,31 @@ this run does and does not say about that.
 **Envelope arithmetic (§1.4, informing Stage 5):** the measured decompressed member is the
 *full year* (four quarters concatenated in one CSV, per BLS's own singlefile format) —
 D_year = 2,199,079,362 bytes, exactly as measured above. **This is the frame this probe
-actually measured, and the year file is the only artifact reachable at all:** the zip
-contains a single member, `2025.q1-q4.singlefile.csv` (see the member-name finding above),
-so there is no per-quarter artifact to download — obtaining any one quarter's rows requires
-first ingesting this entire 2,199,079,362-byte decompressed year file. That ingest cost is
-forced, not conditional on any design choice Stage 5 makes.
+actually measured, and the year file is the only artifact reachable via the one URL
+pattern this run probed** (`data.bls.gov/cew/data/files/{year}/csv/{year}_qtrly_singlefile.zip`):
+the zip contains a single member, `2025.q1-q4.singlefile.csv` (see the member-name finding
+above), so there is no per-quarter artifact to download at that pattern — obtaining any one
+quarter's rows via it requires first ingesting this entire 2,199,079,362-byte decompressed
+year file.
+
+**Scope of that claim.** This run probed exactly one QCEW URL pattern; it did not survey
+QCEW's other artifact families. §20 issue 4 itself names two this run never touched — the
+LABSTAT `en` prefix and the by-size ZIP — and the BLS downloadable-data-files page
+(`bls.gov/cew/downloadable-data-files.htm`, the very page `probes/qcew_sizes.py`'s own
+fallback error message points at) was never fetched to check for others. So "the year file
+is the only artifact reachable at all" overstates this run's evidence; "the only artifact
+reachable via the pattern probed" is what it actually shows. This is the same standard the
+document already applies to the 2026 404 earlier in this section, above: there, a
+differently-named or differently-pathed 2026 artifact existing was explicitly not ruled
+out by the 404 alone. Treating this pattern's absence of an alternative as settled while
+treating the 2026 case as open would apply that reasoning inconsistently within one
+section. Consequently, the ingest cost measured above is real for this artifact family and
+this pattern, but calling it **forced, not conditional on any design choice Stage 5
+makes** overstates it: it is forced *given this artifact*; whether a different QCEW
+artifact family would change the picture is unsurveyed, not ruled out. **This does not
+change the conclusion below** — stream rather than materialize — which holds for the
+artifact this run actually measured regardless of what an unsurveyed family might show;
+only the "no alternative exists" premise is being narrowed here.
 
 What *is* conditional is whether the differ ever needs to hold two such year files in
 memory at once — e.g. comparing one vintage of a year against a later vintage of the same
@@ -673,6 +738,11 @@ failure; see the issue-14 verdict below.
 | Lifecycle API | accepted, 1 rule readable | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
 | Replication API | API present, none configured (`ReplicationConfigurationNotFoundError`) | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
 | PUT/HEAD/GET/LIST medians (1 KiB, ms) | 1.4 / 1.1 / 1.1 / 0.9 | **blocked** — no deployment endpoint credentials | **blocked** — no deployment endpoint credentials; no container runtime on PATH |
+
+This table shows 10 of the run's 12 `checks`; `create_bucket.plain` ("created") and
+`object_lock.put_retention` (folded into the Object lock discussion in section 7) are
+omitted here for brevity — the full matrix is in
+`probes/results/objstore-workstation-dev-127.0.0.1-2026-08-10.json`.
 
 **Issue 14 verdict:** not answerable in this run. Issue 14 asks for the deployment
 endpoint's address and its reachability from the container network; both of the
@@ -799,12 +869,12 @@ objects):
 
 | Parameter | raw bucket `bls-stats-raw` | main bucket `bls-stats-main` |
 |---|---|---|
-| Contents | `raw/` only | `log/`, `ledger/`, `store/`, `ops/` |
+| Contents | `raw/blob/` (content-addressed blobs, never expire) **and** `attest/<release_event_id>` (timestamp proofs, §9.1/R5 — evidence-class, not a rebuild input) — both per `specs/bls-stats-spec.md` §9.2 (lines 1213-1215); not `raw/` alone | `log/`, `ledger/`, `store/`, `ops/` |
 | Created | Stage 2 — only `ObjectLockEnabledForBucket` (Object lock row) is part of the `CreateBucket` call itself; versioning, default retention, the delete-deny policy, and lifecycle are each separate calls issued immediately afterward, in this sheet's row order (see the Object lock row and the required post-creation verification gate below) | Stage 2 |
 | Versioning | Enabled — **dev endpoint (2026-08-10 probe):** `versioning` check: "status=Enabled, versions_after_two_puts=2". Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet; a §17.4 hard requirement must not rest on dev-endpoint evidence alone at execution time. **Unlike the Object lock row, there is no fallback here: if re-verification shows the deployment endpoint doesn't support versioning, that is a stop, not a fallback** — conditional-PUT dedup, per-version `PutObjectRetention`, and compaction all assume versioning is on, and this sheet does not proceed to bucket creation until it is confirmed. | Enabled (same caveat) |
 | Object lock | Two separate calls, not one: (1) `ObjectLockEnabledForBucket=true`, part of `CreateBucket` itself — creation-only, cannot be added to an existing bucket; (2) immediately afterward, a distinct `PutObjectLockConfiguration` call setting default retention **GOVERNANCE, 3650 days** (a mode *and* a duration — §17.4). **Required gate before first capture:** see "Post-creation verification" immediately below this table — this row is not satisfied until that gate passes. | Off — §17.4 generation-swap GC must delete `gen=<n>/` |
 | Endpoint supports lock? | **dev endpoint (2026-08-10 probe): yes**, on every check the probe script runs — `object_lock.create_enabled`: "Enabled"; `object_lock.default_retention_with_duration`: "default retention GOVERNANCE/3650d accepted (a *duration* — §17.4)"; `object_lock.put_retention` (per-object GOVERNANCE retention, the mechanism delete-denial depends on — no row in finding 5's table, JSON-only): "GOVERNANCE +90s on version d73a3374-e800-4092-a820-2c57bc31269a"; `object_lock.delete_denied`: "enforced (`InvalidRequest`)". **Caveat:** the probe labels *any* `ClientError` on the delete attempt as "enforced," and the code actually observed, `InvalidRequest`, is not an access-denial-specific code — so "locked-version delete denied" rests on weaker evidence than the label suggests. **None of these checks cover inheritance** — a new object automatically acquiring the bucket's *default* retention, rather than having retention set explicitly per object. `object_lock.put_retention`/`object_lock.delete_denied` (`probes/objstore_capabilities.py`, functions `lock_retention` then `lock_delete_denied`) set retention *explicitly* on that object, before `object_lock.default_retention_with_duration` (`lock_default_retention`) ever configures the bucket default, and no object is written after the default is configured. That link is untested by this run; it is exactly what the required post-creation verification gate below closes. **This is dev-endpoint evidence only. Deployment endpoint: unprobed** (§20 issue 14, blocked on missing deployment credentials) — **re-verify against the deployment endpoint before Stage 2 executes this sheet**; a dev-endpoint capability must not be promoted to a deployment guarantee (§1.4). Re-verifying the checks above at the deployment endpoint does not by itself close the inheritance gap either — the post-creation gate below must still run there. If the deployment endpoint turns out not to support object lock, §17.4's fallback becomes the *actual* parameter here: delete-deny alone — in that branch, delete-deny is the *sole* protection layer against the runtime credential, so it must be positively verified for the actual non-admin runtime credential (§17.4) before relying on it; the only evidence on record today is NOT ENFORCED, for the root credential only (see the Delete policy row below) — with the gap recorded as a standing finding at Stage 7. | — |
-| Delete policy | Deny `s3:DeleteObject` + `s3:DeleteObjectVersion` to `"AWS": "*"` on `arn:aws:s3:::bls-stats-raw/*` (JSON below); enforced for the runtime credential — **dev endpoint (2026-08-10 probe):** `delete_deny_policy` check: "NOT ENFORCED for this credential (admin/root bypasses bucket policy?) — Stage 2 needs a distinct runtime credential." The credential probed was MinIO's root/admin credential, and it bypassed its own bucket policy. **Stage 2 must provision a distinct non-admin runtime credential before first capture and re-run this check against that credential** — the root-credential result neither confirms nor denies enforcement for any other principal. Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet. | runtime credential MAY delete (generation GC) |
+| Delete policy | Deny `s3:DeleteObject` + `s3:DeleteObjectVersion` to `"AWS": "*"` on `arn:aws:s3:::bls-stats-raw/*` (JSON below); enforced for the runtime credential — **dev endpoint (2026-08-10 probe):** `delete_deny_policy` check: "NOT ENFORCED for this credential (admin/root bypasses bucket policy?) — Stage 2 needs a distinct runtime credential." The credential probed was MinIO's root/admin credential, and it bypassed its own bucket policy. **Stage 2 must provision a distinct non-admin runtime credential before first capture and re-run this check against that credential** — the root-credential result neither confirms nor denies enforcement for any other principal. Deployment endpoint: unprobed (§20 issue 14) — re-verify before Stage 2 executes this sheet. **`specs/bls-stats-spec.md` §17.4 (line 2317) marks this a hard requirement: "Delete denied to the runtime credential on the archive bucket … Do not run without it." Unlike the Object lock row's fallback (delete-deny alone, if object lock is unavailable), there is no fallback for delete-deny itself: if re-verification against the non-admin runtime credential does not show it enforced, that is a stop, not a fallback** — the only evidence on record today (NOT ENFORCED) is for the root credential at the dev endpoint, which is not the credential or the requirement this hard requirement is about. | runtime credential MAY delete (generation GC) |
 | Lifecycle | **None. `raw/` never expires; no tiering** (§17.4, §1.4) | none initially |
 | Region / endpoint | as configured (`AWS_ENDPOINT_URL` — §1.4: never a constant) | same |
 
@@ -828,10 +898,28 @@ Before Stage 2's capture loop writes its first real object, run this sequence ag
    `PutObjectLockConfiguration` call for default retention GOVERNANCE/3650d, call
    `GetObjectLockConfiguration` and assert it returns `ObjectLockEnabled=Enabled` with
    `Rule.DefaultRetention = {Mode: GOVERNANCE, Days: 3650}`.
-2. `PutObject` one throwaway object under a clearly marked key inside the bucket's declared
-   `raw/` prefix (e.g. `raw/_verify/lock-inherit-check` — the Contents row above says `raw/`
-   only, so the verification artifact must live inside it too) — **with no `Retention` argument
-   on the PUT** — so it can only pick up retention by inheritance, not by an explicit call.
+2. `PutObject` one throwaway object at `attest/_verify/lock-inherit-check` — **not** under
+   `raw/blob/`. Default retention is a bucket-level setting (`PutObjectLockConfiguration`
+   is not prefix-scoped), so this still exercises the inheritance path the gate needs to
+   test; the choice of prefix only affects where the object lands, not whether it inherits.
+   `raw/blob/` is specifically the content-addressed namespace (§9.2, line 1214) that N11's
+   fixity sweep re-hashes against each object's own key — a verification marker keyed by an
+   arbitrary string rather than the SHA-256 of its bytes does not belong there: N11 re-hashing
+   it would find a key that no re-hash can ever match, a standing false fixity concern for the
+   life of the object. Two ways to avoid that were available: key the object by the SHA-256 of
+   its own bytes and let it land at the real `raw/blob/sha256=<hh>/<hh>/<sha256>` path (making
+   it fixity-clean by construction), or place it outside `raw/blob/`'s namespace entirely. This
+   sheet takes the second path — `attest/` (added to the Contents row above) already exists in
+   §9.2 as a sibling, evidence-class prefix untouched by the fixity sweep, and a marker proving
+   the bucket's retention setup works is exactly that kind of evidence, not a rebuild input,
+   matching §9.2's own description of what `attest/` holds. The SHA-256-keyed alternative was
+   rejected here because it would make an internal test fixture indistinguishable from a
+   genuine archived BLS blob under `raw/blob/` — conflating an operational check with P2's
+   content-addressed dedup mechanism for actual retrieved artifacts, which is a stronger
+   property than this marker needs. The key `attest/_verify/lock-inherit-check` is not
+   `<release_event_id>`-shaped and must not be mistaken for one — **with no `Retention`
+   argument on the PUT** — so it can only pick up retention by inheritance, not by an explicit
+   call.
 3. Call `GetObjectRetention` on that object's version and assert `Mode=GOVERNANCE` and that
    `RetainUntilDate` is ~3650 days out (use a tolerance window, e.g. ±1 day, rather than an exact
    timestamp — the server computes the date, this sheet does not).
@@ -843,6 +931,38 @@ Note for whoever runs this: step 2's object is written under real GOVERNANCE/365
 the real raw bucket — once written, it is immutable for the full duration absent an admin
 governance-bypass delete. Key it as an explicit verification artifact, not operational data, since
 it cannot simply be deleted afterward.
+
+**If the gate fails — remediation, not just a stop.** Step 4 says first capture does not proceed;
+it does not say what to do with the bucket that failure leaves behind. `ObjectLockEnabledForBucket`
+is already `true` on it and that cannot be undone (§7.3) — the operator is left holding a bucket
+that may also contain a retained object, and recovery differs by exactly which assertion failed:
+
+- **Step 1's assertion fails** (`GetObjectLockConfiguration` doesn't return
+  `GOVERNANCE`/`3650`) — check whether step 2 still ran. If the throwaway object's
+  `GetObjectRetention` (step 3) shows no retention applied at all, inheritance genuinely did not
+  happen and the object is plain and deletable: delete it, then `DeleteBucket` on the now-empty
+  bucket. Object-lock enablement blocks deleting *retained objects*, not an empty bucket, so this
+  is a clean recovery — the bucket can be recreated under the **same** name once the
+  `PutObjectLockConfiguration` call is corrected and the gate is re-run.
+- **Step 3's assertion fails on the duration specifically** (`Mode=GOVERNANCE` is present and
+  correct, but `RetainUntilDate` is not ~3650 days out — e.g. the default was configured with the
+  wrong day count) — the object genuinely *is* retained, just under the wrong duration, so it
+  cannot be deleted normally. Because the mode is GOVERNANCE (not COMPLIANCE), the admin/root
+  credential's governance-bypass delete — already named above as "the deliberate break-glass" — can
+  remove it (see the break-glass note under the delete-deny policy below for what else that bypass
+  requires). Once removed, `DeleteBucket` the emptied bucket and recreate it under the same name
+  with the corrected default-retention duration.
+- **Step 3's assertion fails and the mode itself came back wrong** (e.g. `COMPLIANCE` where
+  GOVERNANCE was intended, or any other non-bypassable state) — the object cannot be removed by any
+  credential, admin included, until the (wrong) retention period elapses years from now. The bucket
+  therefore cannot be emptied and cannot be deleted. Treat it as permanently unusable for capture:
+  do not write real data into it, and do not keep retrying bucket creation under its name. A
+  replacement bucket must be created under a **different** name — and per Decision 2 below, a name
+  change is not a free edit: it propagates into Stage 2's config and reopens that decision for
+  operator sign-off before this sheet is executed again.
+
+In every branch, the gate is re-run against the (possibly renamed) bucket from step 1, and first
+capture waits for a clean pass — a failed run does not get silently retried under looser criteria.
 
 Delete-deny policy for the raw bucket, verbatim:
 
@@ -860,6 +980,41 @@ Delete-deny policy for the raw bucket, verbatim:
   ]
 }
 ```
+
+The policy JSON above is plan-verbatim and is left exactly as pinned; the two gaps below are
+recorded in prose, as pending operator decisions, not applied as edits to it.
+
+**Break-glass path is not free with this `Principal`.** The policy denies to `"AWS": ["*"]` —
+every principal, with no carve-out. An endpoint that honors the policy uniformly therefore also
+denies the admin/root credential's own governance-bypass delete — the same break-glass this
+section already relies on: the gate failure-branch above (its wrong-duration case) and the "Why
+GOVERNANCE and not COMPLIANCE" paragraph below both assume an admin can bypass-delete a
+GOVERNANCE-retained object. As written, that bypass is not available while this bucket policy is
+attached: break-glass requires
+first removing (or suspending) the bucket policy itself, then performing the governance-bypass
+delete, then — if the policy is meant to keep protecting the bucket afterward — reattaching it.
+This is a real operational step, not a detail; whoever holds break-glass authority needs
+`s3:PutBucketPolicy`/`s3:DeleteBucketPolicy` on hand to use it against this policy shape.
+
+**The policy's action list does not cover every path to deletion.** It denies only
+`s3:DeleteObject` and `s3:DeleteObjectVersion`. It does **not** deny `s3:PutBucketLifecycleConfiguration`
+(an expiration rule is itself a path to deletion, distinct from a direct delete call) or
+`s3:PutBucketPolicy`/`s3:DeleteBucketPolicy` (a credential that can rewrite or remove this policy
+can self-authorize the deletes it currently blocks). This matters most precisely in the branch this
+section already names as delete-deny-alone — the fallback if the deployment endpoint turns out not
+to support object lock (see the Object lock row above): in that branch this policy is the *sole*
+protection layer against the runtime credential, so gaps in its action coverage are the actual
+enforcement surface, not a secondary concern. This sheet mandates provisioning a distinct
+non-admin runtime credential (Delete policy row above) but never specifies what IAM/policy actions
+that credential itself may or may not perform — whether it can call `PutBucketLifecycleConfiguration`,
+`PutBucketPolicy`, or `DeleteBucketPolicy` is undetermined by anything on record. Recommendation,
+left as a decision rather than an edit to the JSON above: the runtime credential's own permission
+grant should explicitly exclude those three actions on the raw bucket, in addition to whatever this
+bucket policy denies — this is a gap in what the *credential* may do, not in what the *policy*
+denies, and closing it does not require touching the pinned JSON. (This is separate from the
+already-recorded "two independent layers" qualification below, which is about the *evidence* on
+record for the delete-deny layer; this is about the *scope* of what that layer, and the credential
+behind it, actually covers.)
 
 **Stage-2 note (delete-deny re-run scope — not a fix here; `probes/objstore_capabilities.py` is
 pinned for this stage).** The `delete_deny_policy` check's delete attempt
@@ -955,8 +1110,13 @@ mechanism decision; Stage 2 executes this sheet only once both are confirmed.
 
 - **Stage 5 (data plane):** QCEW envelope arithmetic (section 4): the 2025 singlefile
   zip's one member, `2025.q1-q4.singlefile.csv`, is a **whole-year** artifact (2.2 GB
-  decompressed, 14.6M lines), not the **per-quarter** artifact §8.3 and R13's settled
-  `authoritative_scope` assume. The contradiction's direction is **under-deletion**,
+  decompressed, 14.6M lines) at the one URL pattern this stage probed
+  (`{year}_qtrly_singlefile.zip`), not the **per-quarter** artifact §8.3 and R13's settled
+  `authoritative_scope` assume. Section 4 scopes this precisely: other QCEW artifact
+  families named in §20 issue 4 (the LABSTAT `en` prefix, the by-size ZIP) were not
+  surveyed, so this is a finding about the probed pattern, not a closed claim that no
+  per-quarter QCEW artifact exists anywhere — the stream-not-materialize conclusion below
+  holds regardless. The contradiction's direction is **under-deletion**,
   not §8.3's stated over-deletion hazard: quarters present in the year artifact but
   outside a per-quarter `authoritative_scope` would silently fail to emit genuine
   deletions — a quieter failure than the over-deletion §8.3 was written to prevent.
@@ -1000,6 +1160,19 @@ mechanism decision; Stage 2 executes this sheet only once both are confirmed.
   `authoritative_scope` premise is contradicted by measurement (the artifact is
   whole-year; the failure direction is under-deletion, not over-deletion), and its
   RSS-budget Exit criterion is now a live risk at the year-frame working set rather
-  than a formality; both need resolution before Stage 5's plan is written. No other
-  stage's Objective or Exit text changes; Stage 4 inherits the feed-flavor finding
-  above as an implementation constraint, not a criterion change.
+  than a formality; both need resolution before Stage 5's plan is written.
+  **Spec text needing amendment, not just stage plans:** this bullet has enumerated
+  stages so far, but `specs/bls-stats-spec.md` itself still states the pre-probe
+  posture in two places section 3 bears directly on. §7.1's `html` row (line 721:
+  "Known to 403 ordinary fetchers. Full browser-shaped headers, HTTP/2, low rate.")
+  describes exactly the profile this stage found blocked 6/6, with no mention of the
+  contact profile that passed 6/6 on the same surfaces. §7.2's mitigation ordering
+  (lines 726-745) ranks browser-shaped `httpx` (mitigation 2) ahead of a headless
+  backend (mitigation 3) as the fallback, with no lighter-weight contact-UA rung
+  between them. An implementer who builds Stage 2's `html` transport from spec text
+  alone — without also reading this findings document — would still build the
+  blocked browser-shaped profile the spec currently documents as the mitigation to
+  reach for. Both passages need updating to reflect section 3's result before Stage 2
+  is planned, not only Stage 2's own roadmap entry. No other stage's Objective or
+  Exit text changes; Stage 4 inherits the feed-flavor finding above as an
+  implementation constraint, not a criterion change.
