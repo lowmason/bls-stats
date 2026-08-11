@@ -709,10 +709,43 @@ dev-endpoint observation only; whether the deployment endpoint's root credential
 behaves the same way is untested and remains open alongside the rest of the deployment
 columns.
 
+**Probe-bucket state (§7.3, §17.4 — bears on section 7's bucket-creation
+parameters).** Two claims, kept separate because their evidence differs:
+
+- **No *real* bucket exists anywhere — established, on-disk evidence.**
+  `probes/objstore_capabilities.py`'s module docstring states it "Creates ONLY
+  throwaway `bls-stats-probe-*` buckets and deletes them. NEVER creates the real
+  buckets: §7.3 — those are created in Stage 2 from the findings' parameter sheet."
+  The two buckets this run created are named `bls-stats-probe-plain-{today}` and
+  `bls-stats-probe-lock-{today}` (script lines 74-75); neither `bls-stats-raw` nor
+  `bls-stats-main` (section 7's real bucket names) appears anywhere in this run's
+  twelve `checks`. Section 7 itself is framed as parameters written *before* either
+  real bucket exists. This is the claim §7.3 cares about, and it holds.
+- **No leftover `bls-stats-probe-*` bucket remains — not verifiable from what this
+  stage captured to disk; recorded as a gap, not asserted.** The script's cleanup
+  step (lines 220-235) deletes all object versions in each probe bucket, then the
+  bucket itself, printing `cleaned up {bucket}` (or a `cleanup {bucket}: <error>` line
+  on failure) to stdout — but `finish()` writes only the twelve `checks` to the JSON
+  results file; the cleanup step's outcome is never captured there. The one on-disk
+  data point that bears on bucket count is the JSON's first check,
+  `reachability.list_buckets`: "2 buckets visible" — but that check runs *before*
+  `create_bucket.plain` (the second check), so it establishes only a pre-run count of
+  2 pre-existing, unrelated buckets, not their names and not the post-cleanup state.
+  What would close this gap: capture the cleanup step's per-bucket outcome into the
+  JSON result on a future run (a small addition to the script, out of scope this stage
+  per the pinned-script constraint), or a dedicated post-run `list_buckets` call whose
+  output is saved to `probes/results/`.
+
 ## 6. Replication options — §20 issue 15, mechanism (Task 7)
 
 What settles it: "the deployment's replication decision" — options recorded here,
 `doctor`-confirmed at Stage 7.
+
+**Source:** analysis, not a new probe — options A and C are read off Task 6's probe,
+`probes/objstore_capabilities.py`, run 2026-08-10
+(`probes/results/objstore-workstation-dev-127.0.0.1-2026-08-10.json`, section 5
+above); option B needs no probe (buildable by design — it is the §16.1 adapter's
+existing `list`/`get`/`put` surface).
 
 Requirement (§17.4, R7): an independent second copy of `raw/` + `log/fetch/`; any single-copy
 period longer than one release cycle is a standing finding (N12, reported by `doctor` from
@@ -863,4 +896,110 @@ mechanism decision; Stage 2 executes this sheet only once both are confirmed.
 
 ## 8. Consequences for later stages (Task 8)
 
-*(recorded by Task 8)*
+- **Stage 2 (capture):** Transport posture per host (sections 1-3):
+  `download.bls.gov` and `data.bls.gov` are open to the compliant contact profile for
+  data retrieval — four HEAD/GET checks returned 200 and one ranged GET returned 206
+  across both hosts — build capture on that profile; no browser-shaped headers are
+  needed there. `www.bls.gov`'s `html` transport: the browser-shaped profile (§7.2
+  mitigation 2) was blocked 6/6 by Akamai; the compliant contact profile passed 6/6 —
+  build `html`-profile ingest on the contact profile and leave the headless
+  `HtmlFetcher` backend (§7.2 mitigation 3) **unbuilt-and-pluggable, out of scope**,
+  pending the recommended single-session interleaved-profile follow-up probe that
+  would isolate mechanism (section 3, confounds 1-2 remain open). Range is honored
+  (206) on `download.bls.gov`, but the plain-HEAD `Content-Length` (350,208,884) and
+  the ranged GET's `Content-Range` total (47,300,620) diverge on an identical ETag —
+  unresolved. Default to **omitting `Accept-Encoding: gzip` on range-based bulk
+  transfers**, so ranges run against the uncompressed size HEAD reports, rather than
+  computing offsets against a compressed-stream size whose stability across requests
+  was never confirmed. `Accept-Encoding: gzip` did not change `content-type` away
+  from `application/octet-stream` on `ce.period` — don't key transfer-encoding
+  decisions on `content-type`. Bucket creation executes section 7 verbatim, including
+  its required post-creation retention-inheritance gate (section 7, steps 1-4: create
+  with `ObjectLockEnabledForBucket=true` → set default retention →
+  `PutObject` an unretentioned probe object → `GetObjectRetention` and assert it
+  inherited GOVERNANCE/3650d — treat failure as a stop, not a warning) and its
+  non-admin runtime-credential provisioning (the root credential bypassed the
+  delete-deny policy at dev; re-run that check against the actual runtime credential,
+  covering both a delete-marker attempt and a versioned-delete attempt).
+  Deployment-endpoint versioning is a stop-not-fallback if re-verification shows it
+  absent. Replication decision: **conditional, not yet resolved** — default to
+  option B (second endpoint + pull job) until the deployment endpoint's
+  `replication_api` result is known; §20 issue 14 (deployment endpoint
+  identification, container reachability) is the blocking prerequisite for ever
+  resolving to option A, and remains open past this stage (see
+  `specs/bls-stats-spec-roadmap.md`, Stage 1 entry). R12 compliance: the
+  `www.bls.gov` robots clearance (section 3 addendum) covers only the six probed
+  paths under the generic `User-agent: *` rule — check any additional
+  `html`-profile path (the addendum names three unprobed spec-referenced surfaces:
+  the archived news-release index §11.3, per-release archive links §11.3, per-program
+  notices pages §12.5) against a re-fetched policy before relying on it (§18.3
+  point-in-time caveat). No robots policy was retrieved for `download.bls.gov`
+  (404 at that path, section 1) or `data.bls.gov` (unprobed for `robots.txt`).
+
+- **Stage 3 (store mechanism):** Conditional PUT (`If-None-Match`) is **present and
+  enforced** at the dev endpoint (`PreconditionFailed`) — not absent-as-assumed, not
+  present-but-unused. It is unprobed at the deployment endpoint (§20 issue 14 blocks
+  it). §1.4's single-writer discipline (the lease) stands regardless of what the
+  deployment endpoint's conditional-PUT support turns out to be: the design targets
+  the *intersection* of what both endpoints guarantee, not the dev endpoint's best
+  case, so Stage 3 must not build the lease as an optional optimization layered on
+  top of an assumed-present conditional PUT — the lease is the correctness mechanism
+  until the deployment endpoint's own conditional-PUT support is confirmed.
+
+- **Stage 4 (control plane):** the `.ics` schedule feed and the release feed both
+  return genuine content under the contact profile (section 3 addendum). The release
+  feed is an **Atom** document served with `content-type: application/rss+xml` at a
+  `.rss` path (`/feed/empsit.rss`) — parse defensively for either root element; do not
+  key ingestion on the path or the content-type header, since this run shows they
+  disagree.
+
+- **Stage 5 (data plane):** QCEW envelope arithmetic (section 4): the 2025 singlefile
+  zip's one member, `2025.q1-q4.singlefile.csv`, is a **whole-year** artifact (2.2 GB
+  decompressed, 14.6M lines), not the **per-quarter** artifact §8.3 and R13's settled
+  `authoritative_scope` assume. The contradiction's direction is **under-deletion**,
+  not §8.3's stated over-deletion hazard: quarters present in the year artifact but
+  outside a per-quarter `authoritative_scope` would silently fail to emit genuine
+  deletions — a quieter failure than the over-deletion §8.3 was written to prevent.
+  Stage 5 must reconcile which frame governs `authoritative_scope` before hardening
+  the differ; this is flagged here, not resolved (out of this stage's scope).
+  Memory implication: two whole-year files held in memory at once (the frame this
+  measurement actually supports — e.g. comparing vintages of the same year) is
+  ~4.10 GiB, only ~1.8-1.95x under the 8 GB peak-RSS budget, and arithmetic shows even
+  a modest, illustrative 2x parse-overhead multiplier busts both conventions of that
+  budget at the year frame. Stage 5's "a QCEW-scale run stays inside the RSS budget"
+  exit criterion is therefore a live risk, not a formality: the differ must stream
+  rather than materialize whole years (or downstream quarters), and Stage 5 must
+  measure actual parsed-in-memory RSS directly (R18's memory-envelope gate) rather
+  than extrapolate from this probe's ~75 MiB figure, which describes only the
+  never-materializing streaming-measurement process, not a parsed diff of any size.
+
+- **Stage 7 (ops):** `doctor` must report the section-5 capability matrix live
+  against whichever endpoint is actually configured — a dev-only result must never
+  stand in for the deployment endpoint (§1.4) — including the two columns still
+  blocked here (`workstation-deploy`, `container`) until §20 issue 14 closes. N11
+  (fixity) and N12 (replication single-copy-period) baselines start accruing from
+  Stage 2's first capture, not from this stage's probe date: N11 re-hashes `raw/`
+  blobs and N12 tracks `raw/` + `log/fetch/`'s single-copy period, and neither
+  directory exists yet. §7.1's "HTTP 200 is necessary but not sufficient" rule ships
+  to Stage 2 as standing policy, carried forward unverified-by-probe (no
+  HTTP-vs-payload divergence was witnessed this run, on either the v1 or v2 request);
+  Stage 7's daily report/`doctor` should be positioned to catch that trap the first
+  time it actually fires in production. The API key's annual-expiry alert (§7.1) is a
+  Stage-2 setup item — the key itself is already provisioned and working as of this
+  stage's probe.
+
+- **Roadmap re-validation:** this changes three stages' assumptions, not none.
+  **Stage 2** — its build now targets the contact profile for `html` ingest with
+  headless out of scope pending a follow-up probe, and §20 issue 14's two
+  operator-blocked items (deployment-endpoint credentials; a deployment-side
+  container shell/runtime) become Stage-2 prerequisites, not leftover Stage-1 work
+  (see `specs/bls-stats-spec-roadmap.md`, Stage 1 entry, for the exact open item).
+  **Stage 3** — conditional PUT is confirmed present and enforced at the dev
+  endpoint, sharpening rather than changing its Exit criteria, with
+  deployment-endpoint confirmation still pending. **Stage 5** — §8.3's per-quarter
+  `authoritative_scope` premise is contradicted by measurement (the artifact is
+  whole-year; the failure direction is under-deletion, not over-deletion), and its
+  RSS-budget Exit criterion is now a live risk at the year-frame working set rather
+  than a formality; both need resolution before Stage 5's plan is written. No other
+  stage's Objective or Exit text changes; Stage 4 inherits the feed-flavor finding
+  above as an implementation constraint, not a criterion change.
